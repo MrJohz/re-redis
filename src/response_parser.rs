@@ -1,4 +1,3 @@
-use std::cmp::min;
 use std::mem::replace;
 use std::num::ParseIntError;
 use std::str::{from_utf8, Utf8Error};
@@ -144,12 +143,12 @@ fn parse_response(
                             size: int as usize,
                         };
                     }
-                    Some(Ok(int @ 0)) => {
+                    Some(Ok(0)) => {
                         *ptr += 4;
                         *state = ResponseParserState::Waiting;
                         return Ok(Some(RedisResponse::String(String::new())));
                     }
-                    Some(Ok(int @ -1)) => {
+                    Some(Ok(-1)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
                         return Ok(Some(RedisResponse::Null));
@@ -186,12 +185,12 @@ fn parse_response(
                         // jump straight to parsing the first element of this array
                         continue;
                     }
-                    Some(Ok(int @ 0)) => {
+                    Some(Ok(0)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
                         return Ok(Some(RedisResponse::Array(Vec::new())));
                     }
-                    Some(Ok(int @ -1)) => {
+                    Some(Ok(-1)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
                         return Ok(Some(RedisResponse::Null));
@@ -199,10 +198,6 @@ fn parse_response(
                     Some(Ok(int)) => {
                         *state = ResponseParserState::Errored;
                         return Err(ParseError::InvalidArrayLength(int));
-                    }
-                    Some(Err(err)) => {
-                        *state = ResponseParserState::Errored;
-                        return Err(err);
                     }
                     Some(Err(err)) => {
                         *state = ResponseParserState::Errored;
