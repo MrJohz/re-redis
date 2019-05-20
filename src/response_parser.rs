@@ -6,7 +6,7 @@ pub enum RedisResponse {
     String(String),
     Integer(i64),
     Array(Vec<RedisResponse>),
-    Error(String), // use a string for now, can be changed to a unique RediError enum
+    Error(String), // use a string for now, can be changed to a unique RedisError enum
     Null,
 }
 
@@ -16,6 +16,7 @@ pub enum ParseError {
     CannotConvertToUtf8(Utf8Error),
     InvalidBulkStringLength(i64),
     InvalidArrayLength(i64),
+    InvalidResponseTypePrefix(char),
     ParserIsInAnErrorState,
 }
 
@@ -104,7 +105,10 @@ fn parse_response(
                     '-' => ResponseParserState::ParsingError { start: *ptr + 1 },
                     '$' => ResponseParserState::ParsingBulkStringSize { start: *ptr + 1 },
                     '*' => ResponseParserState::ParsingArraySize { start: *ptr + 1 },
-                    any => unimplemented!("Invalid char {} - Err case not yet implemented", any),
+                    any => {
+                        *state = ResponseParserState::Errored;
+                        return Err(ParseError::InvalidResponseTypePrefix(any));
+                    }
                 };
             }
             ResponseParserState::ParsingInteger { start } => {
@@ -547,5 +551,18 @@ mod tests {
             Ok(Some(RedisResponse::Array(redis_array))),
             parser.get_response()
         );
+    }
+
+    #[quickcheck]
+    fn qc_can_attempt_to_parse_anything_without_panicking(input: String) {
+        let mut parser = ResponseParser::new();
+        parser.feed(&input);
+        loop {
+            match parser.get_response() {
+                Ok(Some(_)) => continue,
+                Ok(None) => break, // input is used up
+                Err(_) => break,   // parsing encountered an error
+            }
+        }
     }
 }
