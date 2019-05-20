@@ -1,5 +1,4 @@
 use std::mem::replace;
-use std::num::ParseIntError;
 use std::str::{from_utf8, Utf8Error};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -49,10 +48,26 @@ enum ResponseParserState {
     },
 }
 
-fn parse_integer(data: &[u8], start: &usize, ptr: &mut usize) -> Option<Result<i64, ParseError>> {
+fn max_needed_buffer(state: &ResponseParserState, current: usize) -> usize {
+    match state {
+        ResponseParserState::Waiting => 0,
+        ResponseParserState::Errored => 0,
+        ResponseParserState::ParsingInteger { start } => current - start,
+        ResponseParserState::ParsingSimpleString { start } => current - start,
+        ResponseParserState::ParsingError { start } => current - start,
+        ResponseParserState::ParsingBulkStringSize { start } => current - start,
+        ResponseParserState::ParsingBulkString { start, .. } => current - start,
+        ResponseParserState::ParsingArraySize { start } => current - start,
+        ResponseParserState::ParsingArray { cur_state, .. } => {
+            max_needed_buffer(cur_state, current)
+        }
+    }
+}
+
+fn parse_integer(data: &[u8], start: usize, ptr: &mut usize) -> Option<Result<i64, ParseError>> {
     match data[*ptr] as char {
         '\r' => Some(
-            from_utf8(&data[*start..*ptr])
+            from_utf8(&data[start..*ptr])
                 .map_err(ParseError::CannotConvertToUtf8)
                 .and_then(|str| str.parse().map_err(ParseError::CannotParseInteger)),
         ),
@@ -62,14 +77,14 @@ fn parse_integer(data: &[u8], start: &usize, ptr: &mut usize) -> Option<Result<i
 
 fn parse_simple_string(
     data: &[u8],
-    start: &usize,
+    start: usize,
     ptr: &mut usize,
 ) -> Option<Result<String, ParseError>> {
     match data[*ptr] as char {
         '\r' => Some(
-            from_utf8(&data[*start..*ptr])
+            from_utf8(&data[start..*ptr])
                 .map_err(ParseError::CannotConvertToUtf8)
-                .map(|str| str.to_string()),
+                .map(ToString::to_string),
         ),
         _ => None,
     }
@@ -93,7 +108,7 @@ fn parse_response(
                 };
             }
             ResponseParserState::ParsingInteger { start } => {
-                match parse_integer(data, start, ptr) {
+                match parse_integer(data, *start, ptr) {
                     Some(Ok(int)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
@@ -107,7 +122,7 @@ fn parse_response(
                 }
             }
             ResponseParserState::ParsingSimpleString { start } => {
-                match parse_simple_string(data, start, ptr) {
+                match parse_simple_string(data, *start, ptr) {
                     Some(Ok(string)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
@@ -121,7 +136,7 @@ fn parse_response(
                 }
             }
             ResponseParserState::ParsingError { start } => {
-                match parse_simple_string(data, start, ptr) {
+                match parse_simple_string(data, *start, ptr) {
                     Some(Ok(string)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
@@ -135,7 +150,7 @@ fn parse_response(
                 }
             }
             ResponseParserState::ParsingBulkStringSize { start } => {
-                match parse_integer(data, start, ptr) {
+                match parse_integer(data, *start, ptr) {
                     Some(Ok(int @ 1...std::i64::MAX)) => {
                         *ptr += 2;
                         *state = ResponseParserState::ParsingBulkString {
@@ -174,7 +189,7 @@ fn parse_response(
                 }
             }
             ResponseParserState::ParsingArraySize { start } => {
-                match parse_integer(data, start, ptr) {
+                match parse_integer(data, *start, ptr) {
                     Some(Ok(int @ 1...std::i64::MAX)) => {
                         *ptr += 2;
                         *state = ResponseParserState::ParsingArray {
@@ -213,10 +228,8 @@ fn parse_response(
                 Ok(Some(element)) => {
                     elements.push(element);
                     if elements.len() == elements.capacity() {
-                        if let ResponseParserState::ParsingArray {
-                            elements,
-                            cur_state: _,
-                        } = replace(state, ResponseParserState::Waiting)
+                        if let ResponseParserState::ParsingArray { elements, .. } =
+                            replace(state, ResponseParserState::Waiting)
                         {
                             return Ok(Some(RedisResponse::Array(elements)));
                         } else {
@@ -269,27 +282,20 @@ impl ResponseParser {
         self.buffer.push_str(response)
     }
 
-    fn parse_integer(
-        raw: &[u8],
-        ptr: &mut usize,
-        buf: &mut String,
-    ) -> Result<Option<i64>, ParseIntError> {
-        while raw[*ptr] as char != '\r' {
-            buf.push(raw[*ptr] as char);
-            *ptr += 1;
-            if *ptr >= raw.len() {
-                return Ok(None);
-            }
-        }
-
-        *ptr += 2;
-
-        buf.parse().map(|num| Some(num))
-    }
-
     pub fn get_response(&mut self) -> Result<Option<RedisResponse>, ParseError> {
         let Self { buffer, ptr, state } = self;
-        parse_response(buffer.as_bytes(), ptr, state)
+        let response = parse_response(buffer.as_bytes(), ptr, state);
+        if let Ok(Some(response)) = response {
+            let mut needed_buffer_start = *ptr - max_needed_buffer(state, *ptr);
+            while !buffer.is_char_boundary(needed_buffer_start) {
+                needed_buffer_start -= 1;
+            }
+            buffer.replace_range(0..needed_buffer_start, "");
+            *ptr -= needed_buffer_start;
+            Ok(Some(response))
+        } else {
+            response
+        }
     }
 }
 
