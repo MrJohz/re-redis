@@ -1,14 +1,7 @@
 use std::mem::replace;
 use std::str::{from_utf8, Utf8Error};
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum RedisResponse {
-    String(String),
-    Integer(i64),
-    Array(Vec<RedisResponse>),
-    Error(String), // use a string for now, can be changed to a unique RedisError enum
-    Null,
-}
+use crate::RedisResponse;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParseError {
@@ -279,10 +272,6 @@ impl ResponseParser {
     }
 
     pub fn feed(&mut self, response: &str) {
-        // TODO: currently the buffer is never cleared, leading
-        //   to the buffer being potentially infinite in size
-        //   Implement some sort of safe delete process that runs
-        //   occasionally (e.g. when buffer hits a max size)
         self.buffer.push_str(response)
     }
 
@@ -293,6 +282,9 @@ impl ResponseParser {
             let mut needed_buffer_start = *ptr - max_needed_buffer(state, *ptr);
             while !buffer.is_char_boundary(needed_buffer_start) {
                 needed_buffer_start -= 1;
+                if needed_buffer_start <= 0 {
+                    return Ok(Some(response));
+                }
             }
             buffer.replace_range(0..needed_buffer_start, "");
             *ptr -= needed_buffer_start;
