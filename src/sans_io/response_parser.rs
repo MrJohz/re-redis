@@ -1,7 +1,7 @@
 use std::mem::replace;
 use std::str::{from_utf8, Utf8Error};
 
-use crate::RedisResponse;
+use crate::RedisValue;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParseError {
@@ -37,7 +37,7 @@ enum ResponseParserState {
         start: usize,
     },
     ParsingArray {
-        elements: Vec<RedisResponse>,
+        elements: Vec<RedisValue>,
         cur_state: Box<ResponseParserState>,
     },
 }
@@ -88,7 +88,7 @@ fn parse_response(
     data: &[u8],
     ptr: &mut usize,
     state: &mut ResponseParserState,
-) -> Result<Option<RedisResponse>, ParseError> {
+) -> Result<Option<RedisValue>, ParseError> {
     while *ptr < data.len() {
         match state {
             ResponseParserState::Waiting => {
@@ -109,7 +109,7 @@ fn parse_response(
                     Some(Ok(int)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisResponse::Integer(int)));
+                        return Ok(Some(RedisValue::Integer(int)));
                     }
                     Some(Err(err)) => {
                         *state = ResponseParserState::Errored;
@@ -123,7 +123,7 @@ fn parse_response(
                     Some(Ok(string)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisResponse::String(string)));
+                        return Ok(Some(RedisValue::String(string)));
                     }
                     Some(Err(err)) => {
                         *state = ResponseParserState::Errored;
@@ -137,7 +137,7 @@ fn parse_response(
                     Some(Ok(string)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisResponse::Error(string)));
+                        return Ok(Some(RedisValue::Error(string)));
                     }
                     Some(Err(err)) => {
                         *state = ResponseParserState::Errored;
@@ -158,12 +158,12 @@ fn parse_response(
                     Some(Ok(0)) => {
                         *ptr += 4;
                         *state = ResponseParserState::Waiting;
-                        return Ok(Some(RedisResponse::String(String::new())));
+                        return Ok(Some(RedisValue::String(String::new())));
                     }
                     Some(Ok(-1)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
-                        return Ok(Some(RedisResponse::Null));
+                        return Ok(Some(RedisValue::Null));
                     }
                     Some(Ok(int)) => {
                         *state = ResponseParserState::Errored;
@@ -180,7 +180,7 @@ fn parse_response(
                 if *start + *size == *ptr {
                     let data = from_utf8(&data[*start..*ptr])
                         .map_err(ParseError::CannotConvertToUtf8)
-                        .map(|string| Some(RedisResponse::String(string.to_string())));
+                        .map(|string| Some(RedisValue::String(string.to_string())));
                     *ptr += 1;
                     return data;
                 }
@@ -200,12 +200,12 @@ fn parse_response(
                     Some(Ok(0)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
-                        return Ok(Some(RedisResponse::Array(Vec::new())));
+                        return Ok(Some(RedisValue::Array(Vec::new())));
                     }
                     Some(Ok(-1)) => {
                         *ptr += 2;
                         *state = ResponseParserState::Waiting;
-                        return Ok(Some(RedisResponse::Null));
+                        return Ok(Some(RedisValue::Null));
                     }
                     Some(Ok(int)) => {
                         *state = ResponseParserState::Errored;
@@ -228,7 +228,7 @@ fn parse_response(
                         if let ResponseParserState::ParsingArray { elements, .. } =
                             replace(state, ResponseParserState::Waiting)
                         {
-                            return Ok(Some(RedisResponse::Array(elements)));
+                            return Ok(Some(RedisValue::Array(elements)));
                         } else {
                             panic!("This point should be unreachable");
                         }
@@ -275,7 +275,7 @@ impl ResponseParser {
         self.buffer.push_str(response)
     }
 
-    pub fn get_response(&mut self) -> Result<Option<RedisResponse>, ParseError> {
+    pub fn get_response(&mut self) -> Result<Option<RedisValue>, ParseError> {
         let Self { buffer, ptr, state } = self;
         let response = parse_response(buffer.as_bytes(), ptr, state);
         if let Ok(Some(response)) = response {
@@ -305,22 +305,22 @@ mod tests {
     fn can_parse_numbers_from_redis_response() {
         let mut parser = ResponseParser::new();
         parser.feed(":42\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Integer(42))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(42))), parser.get_response());
     }
 
     #[quickcheck]
     fn qc_can_parse_any_number_from_redis_response(num: i64) {
         let mut parser = ResponseParser::new();
         parser.feed(&format!(":{}\r\n", num));
-        assert_eq!(Ok(Some(RedisResponse::Integer(num))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(num))), parser.get_response());
     }
 
     #[test]
     fn can_parse_multiple_numbers_in_a_row() {
         let mut parser = ResponseParser::new();
         parser.feed(":42\r\n:123\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Integer(42))), parser.get_response());
-        assert_eq!(Ok(Some(RedisResponse::Integer(123))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(42))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(123))), parser.get_response());
     }
 
     #[test]
@@ -330,10 +330,10 @@ mod tests {
         assert_eq!(Ok(None), parser.get_response());
 
         parser.feed("12\r");
-        assert_eq!(Ok(Some(RedisResponse::Integer(412))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(412))), parser.get_response());
 
         parser.feed("\n:1\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Integer(1))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(1))), parser.get_response());
 
         parser.feed(":");
         assert_eq!(Ok(None), parser.get_response());
@@ -342,7 +342,7 @@ mod tests {
         assert_eq!(Ok(None), parser.get_response());
 
         parser.feed("\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Integer(412))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Integer(412))), parser.get_response());
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("+OK\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::String("OK".to_string()))),
+            Ok(Some(RedisValue::String("OK".to_string()))),
             parser.get_response()
         );
     }
@@ -371,7 +371,7 @@ mod tests {
 
         let mut parser = ResponseParser::new();
         parser.feed(&format!("+{}\r\n", text));
-        assert_eq!(Ok(Some(RedisResponse::String(text))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::String(text))), parser.get_response());
         TestResult::passed()
     }
 
@@ -380,7 +380,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("-OK\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::Error("OK".to_string()))),
+            Ok(Some(RedisValue::Error("OK".to_string()))),
             parser.get_response()
         );
     }
@@ -394,7 +394,7 @@ mod tests {
 
         let mut parser = ResponseParser::new();
         parser.feed(&format!("-{}\r\n", text));
-        assert_eq!(Ok(Some(RedisResponse::Error(text))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Error(text))), parser.get_response());
         TestResult::passed()
     }
 
@@ -403,7 +403,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("$2\r\nOK\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::String("OK".to_string()))),
+            Ok(Some(RedisValue::String("OK".to_string()))),
             parser.get_response()
         );
     }
@@ -416,7 +416,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("$0\r\n\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::String("".to_string()))),
+            Ok(Some(RedisValue::String("".to_string()))),
             parser.get_response()
         );
     }
@@ -435,14 +435,14 @@ mod tests {
     fn qc_can_parse_any_bulk_string(text: String) {
         let mut parser = ResponseParser::new();
         parser.feed(&format!("${}\r\n{}\r\n", text.len(), text));
-        assert_eq!(Ok(Some(RedisResponse::String(text))), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::String(text))), parser.get_response());
     }
 
     #[test]
     fn can_parse_the_null_bulk_string() {
         let mut parser = ResponseParser::new();
         parser.feed("$-1\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Null)), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Null)), parser.get_response());
     }
 
     #[test]
@@ -459,15 +459,15 @@ mod tests {
              -Bar\r\n",
         );
         assert_eq!(
-            Ok(Some(RedisResponse::Array(vec![
-                RedisResponse::Array(vec![
-                    RedisResponse::Integer(1),
-                    RedisResponse::Integer(2),
-                    RedisResponse::Integer(3),
+            Ok(Some(RedisValue::Array(vec![
+                RedisValue::Array(vec![
+                    RedisValue::Integer(1),
+                    RedisValue::Integer(2),
+                    RedisValue::Integer(3),
                 ]),
-                RedisResponse::Array(vec![
-                    RedisResponse::String("Foo".to_string()),
-                    RedisResponse::Error("Bar".to_string()),
+                RedisValue::Array(vec![
+                    RedisValue::String("Foo".to_string()),
+                    RedisValue::Error("Bar".to_string()),
                 ])
             ]))),
             parser.get_response()
@@ -479,7 +479,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("*0\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::Array(Vec::new()))),
+            Ok(Some(RedisValue::Array(Vec::new()))),
             parser.get_response()
         );
     }
@@ -488,7 +488,7 @@ mod tests {
     fn can_parse_a_null_array() {
         let mut parser = ResponseParser::new();
         parser.feed("*-1\r\n");
-        assert_eq!(Ok(Some(RedisResponse::Null)), parser.get_response());
+        assert_eq!(Ok(Some(RedisValue::Null)), parser.get_response());
     }
 
     #[test]
@@ -506,7 +506,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("*1\r\n:0\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::Array(vec![RedisResponse::Integer(0),]))),
+            Ok(Some(RedisValue::Array(vec![RedisValue::Integer(0),]))),
             parser.get_response()
         )
     }
@@ -516,9 +516,9 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("*2\r\n:0\r\n:0\r\n");
         assert_eq!(
-            Ok(Some(RedisResponse::Array(vec![
-                RedisResponse::Integer(0),
-                RedisResponse::Integer(0),
+            Ok(Some(RedisValue::Array(vec![
+                RedisValue::Integer(0),
+                RedisValue::Integer(0),
             ]))),
             parser.get_response()
         )
@@ -532,15 +532,12 @@ mod tests {
             text.push_str(&format!(":{}\r\n", int));
         }
 
-        let redis_array = ints
-            .iter()
-            .map(|int| RedisResponse::Integer(*int))
-            .collect();
+        let redis_array = ints.iter().map(|int| RedisValue::Integer(*int)).collect();
 
         let mut parser = ResponseParser::new();
         parser.feed(&text);
         assert_eq!(
-            Ok(Some(RedisResponse::Array(redis_array))),
+            Ok(Some(RedisValue::Array(redis_array))),
             parser.get_response()
         );
     }

@@ -1,5 +1,5 @@
-use crate::types::from_redis::FromRedisValue;
-use crate::types::into_redis::IntoRedisValue;
+use crate::RedisValue;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 
 #[derive(Clone)]
@@ -18,16 +18,16 @@ impl Command {
 
     pub fn cmd_with_args(
         name: impl Into<String>,
-        args: impl IntoIterator<Item = impl IntoRedisValue>,
+        args: impl IntoIterator<Item = impl Into<RedisArg>>,
     ) -> Self {
         Command {
             name: name.into(),
-            args: args.into_iter().map(IntoRedisValue::convert).collect(),
+            args: args.into_iter().map(Into::into).map(|arg| arg.0).collect(),
         }
     }
 
-    pub fn with_arg(&mut self, argument: impl IntoRedisValue) -> &mut Self {
-        self.args.push(argument.convert());
+    pub fn with_arg(&mut self, argument: impl Into<RedisArg>) -> &mut Self {
+        self.args.push(argument.into().0);
         self
     }
 
@@ -42,36 +42,88 @@ impl Command {
     }
 }
 
+pub struct RedisArg(String);
+
+macro_rules! create_into_redis_impl {
+    ($kind:ty, $name:ident => $conversion:block) => {
+        impl From<$kind> for RedisArg {
+            fn from($name: $kind) -> Self {
+                RedisArg($conversion)
+            }
+        }
+    };
+    ($kind:ty, $name:ident => $conversion:expr) => {
+        impl From<$kind> for RedisArg {
+            fn from($name: $kind) -> Self {
+                RedisArg($conversion)
+            }
+        }
+    };
+    ($kind:ty, default) => {
+        impl From<$kind> for RedisArg {
+            fn from(element: $kind) -> Self {
+                RedisArg(element.to_string())
+            }
+        }
+    };
+}
+
+create_into_redis_impl! {isize, default}
+create_into_redis_impl! {i64, default}
+create_into_redis_impl! {i32, default}
+create_into_redis_impl! {i16, default}
+create_into_redis_impl! {i8, default}
+
+create_into_redis_impl! {usize, default}
+create_into_redis_impl! {u64, default}
+create_into_redis_impl! {u32, default}
+create_into_redis_impl! {u16, default}
+create_into_redis_impl! {u8, default}
+
+create_into_redis_impl! {f64, default}
+create_into_redis_impl! {f32, default}
+
+create_into_redis_impl! {bool, default}
+create_into_redis_impl! {char, default}
+
+create_into_redis_impl! {&str, default}
+create_into_redis_impl! {String, input => input}
+
 pub trait StructuredCommand {
-    type Output: FromRedisValue;
-
-    fn get_command(&self) -> Command;
+    type Output: TryFrom<RedisValue>;
 }
 
-struct CommandSet {
-    command: Command,
+macro_rules! create_structured_command {
+    (pub $type_name:ident => $existing_type:ty) => {
+        // Note the creation of an unusable enum.  An enum with no members cannot be created.
+        // Supposedly, rustc can (or will eventually be able to) figure this out, and do some
+        // optimisations based on this.  In the meantime, we'll just let the compiler know
+        // that this is allowed to appear like dead code.
+        #[allow(dead_code)]
+        pub enum $type_name { }
+
+        impl StructuredCommand for $type_name {
+            type Output = $existing_type;
+        }
+    };
+    (pub $type_name:ident => $($existing_type:ty)|+) => {
+        // Note that this is *not* an unusable enum, but a struct with a PhantomData element.
+        // Because rustc requires that all structs use every single type parameter given to
+        // them, we need to store a PhantomData to let rustc know that this is being used.  This
+        // means that it will be possible to create this struct, although also very pointless.
+        #[allow(dead_code)]
+        pub struct $type_name<T>(PhantomData<T>);
+
+        $(
+            impl StructuredCommand for $type_name<$existing_type> {
+                type Output = $existing_type;
+            }
+        )*
+    };
 }
 
-impl StructuredCommand for CommandSet {
-    type Output = ();
-
-    fn get_command(&self) -> Command {
-        self.command.clone()
-    }
-}
-
-struct CommandGet<T> {
-    command: Command,
-    _phantom_field: PhantomData<T>,
-}
-
-impl StructuredCommand for CommandGet<i64> {
-    type Output = i64;
-
-    fn get_command(&self) -> Command {
-        self.command.clone()
-    }
-}
+create_structured_command! { pub CommandSet => () }
+create_structured_command! { pub CommandGet => String | i64 }
 
 #[cfg(test)]
 mod tests {
