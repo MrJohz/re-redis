@@ -281,10 +281,10 @@ impl ResponseParser {
         if let Ok(Some(response)) = response {
             let mut needed_buffer_start = *ptr - max_needed_buffer(state, *ptr);
             while !buffer.is_char_boundary(needed_buffer_start) {
-                needed_buffer_start -= 1;
-                if needed_buffer_start <= 0 {
+                if needed_buffer_start <= 1 {
                     return Ok(Some(response));
                 }
+                needed_buffer_start -= 1;
             }
             buffer.replace_range(0..needed_buffer_start, "");
             *ptr -= needed_buffer_start;

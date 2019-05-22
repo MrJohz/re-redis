@@ -19,7 +19,7 @@ impl RedisError {
     }
 
     pub fn message(&self) -> Option<&str> {
-        self.contents.splitn(2, ' ').skip(1).next()
+        self.contents.splitn(2, ' ').nth(1)
     }
 }
 

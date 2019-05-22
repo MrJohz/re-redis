@@ -32,7 +32,7 @@ impl Command {
     }
 
     pub fn get_command_string(&self) -> String {
-        let mut result = format!("{}", self.name);
+        let mut result = self.name.clone();
         for arg in &(self.args) {
             result.push_str(" ");
             result.push_str(arg);
