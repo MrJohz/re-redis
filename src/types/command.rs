@@ -44,7 +44,7 @@ impl Command {
 
 pub struct RedisArg(String);
 
-macro_rules! create_into_redis_impl {
+macro_rules! create_convert_to_redis_arg_impl {
     ($kind:ty, $name:ident => $conversion:block) => {
         impl From<$kind> for RedisArg {
             fn from($name: $kind) -> Self {
@@ -68,26 +68,26 @@ macro_rules! create_into_redis_impl {
     };
 }
 
-create_into_redis_impl! {isize, default}
-create_into_redis_impl! {i64, default}
-create_into_redis_impl! {i32, default}
-create_into_redis_impl! {i16, default}
-create_into_redis_impl! {i8, default}
+create_convert_to_redis_arg_impl! {isize, default}
+create_convert_to_redis_arg_impl! {i64, default}
+create_convert_to_redis_arg_impl! {i32, default}
+create_convert_to_redis_arg_impl! {i16, default}
+create_convert_to_redis_arg_impl! {i8, default}
 
-create_into_redis_impl! {usize, default}
-create_into_redis_impl! {u64, default}
-create_into_redis_impl! {u32, default}
-create_into_redis_impl! {u16, default}
-create_into_redis_impl! {u8, default}
+create_convert_to_redis_arg_impl! {usize, default}
+create_convert_to_redis_arg_impl! {u64, default}
+create_convert_to_redis_arg_impl! {u32, default}
+create_convert_to_redis_arg_impl! {u16, default}
+create_convert_to_redis_arg_impl! {u8, default}
 
-create_into_redis_impl! {f64, default}
-create_into_redis_impl! {f32, default}
+create_convert_to_redis_arg_impl! {f64, default}
+create_convert_to_redis_arg_impl! {f32, default}
 
-create_into_redis_impl! {bool, default}
-create_into_redis_impl! {char, default}
+create_convert_to_redis_arg_impl! {bool, default}
+create_convert_to_redis_arg_impl! {char, default}
 
-create_into_redis_impl! {&str, default}
-create_into_redis_impl! {String, input => input}
+create_convert_to_redis_arg_impl! {&str, default}
+create_convert_to_redis_arg_impl! {String, input => input}
 
 pub trait StructuredCommand {
     type Output: TryFrom<RedisValue>;
@@ -123,7 +123,12 @@ macro_rules! create_structured_command {
 }
 
 create_structured_command! { pub CommandSet => () }
-create_structured_command! { pub CommandGet => String | i64 }
+create_structured_command! { pub CommandGet =>
+    Option<String> |
+    Option<isize> | Option<i64> | Option<i32> | Option<i16> | Option<i8> |
+    Option<usize> | Option<u64> | Option<u32> | Option<u16> | Option<u8> |
+    Option<f64> | Option<f32>
+}
 
 #[cfg(test)]
 mod tests {
