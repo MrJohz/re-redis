@@ -1,7 +1,7 @@
 use std::mem::replace;
 use std::str::{from_utf8, Utf8Error};
 
-use crate::RedisValue;
+use crate::{RedisError, RedisValue};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParseError {
@@ -137,7 +137,7 @@ fn parse_response(
                     Some(Ok(string)) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisValue::Error(string)));
+                        return Ok(Some(RedisValue::Error(RedisError::new(string))));
                     }
                     Some(Err(err)) => {
                         *state = ResponseParserState::Errored;
@@ -298,6 +298,7 @@ impl ResponseParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RedisError;
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
 
@@ -380,7 +381,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("-OK\r\n");
         assert_eq!(
-            Ok(Some(RedisValue::Error("OK".to_string()))),
+            Ok(Some(RedisValue::Error(RedisError::new("OK")))),
             parser.get_response()
         );
     }
@@ -394,7 +395,10 @@ mod tests {
 
         let mut parser = ResponseParser::new();
         parser.feed(&format!("-{}\r\n", text));
-        assert_eq!(Ok(Some(RedisValue::Error(text))), parser.get_response());
+        assert_eq!(
+            Ok(Some(RedisValue::Error(RedisError::new(text)))),
+            parser.get_response()
+        );
         TestResult::passed()
     }
 
@@ -467,7 +471,7 @@ mod tests {
                 ]),
                 RedisValue::Array(vec![
                     RedisValue::String("Foo".to_string()),
-                    RedisValue::Error("Bar".to_string()),
+                    RedisValue::Error(RedisError::new("Bar")),
                 ])
             ]))),
             parser.get_response()
