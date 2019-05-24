@@ -2,6 +2,8 @@ use std::mem::replace;
 use std::str::{from_utf8, Utf8Error};
 
 use crate::{RedisError, RedisValue};
+use std::cmp;
+use std::iter::empty;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParseError {
@@ -256,37 +258,34 @@ fn parse_response(
 }
 
 #[derive(Debug)]
-pub struct ResponseParser {
-    buffer: String,
+pub(in crate::sans_io) struct ResponseParser {
+    buffer: Vec<u8>,
     ptr: usize,
     state: ResponseParserState,
 }
 
 impl ResponseParser {
-    pub fn new() -> Self {
+    pub(in crate::sans_io) fn new() -> Self {
         Self {
-            buffer: String::new(),
+            buffer: Vec::new(),
             ptr: 0,
             state: ResponseParserState::Waiting,
         }
     }
 
-    pub fn feed(&mut self, response: &str) {
-        self.buffer.push_str(response)
+    pub(in crate::sans_io) fn feed(&mut self, response: &[u8]) {
+        self.buffer.extend_from_slice(response)
     }
 
-    pub fn get_response(&mut self) -> Result<Option<RedisValue>, ParseError> {
+    pub(in crate::sans_io) fn get_response(&mut self) -> Result<Option<RedisValue>, ParseError> {
         let Self { buffer, ptr, state } = self;
-        let response = parse_response(buffer.as_bytes(), ptr, state);
+        let response = parse_response(&buffer, ptr, state);
         if let Ok(Some(response)) = response {
-            let mut needed_buffer_start = *ptr - max_needed_buffer(state, *ptr);
-            while !buffer.is_char_boundary(needed_buffer_start) {
-                if needed_buffer_start <= 1 {
-                    return Ok(Some(response));
-                }
-                needed_buffer_start -= 1;
-            }
-            buffer.replace_range(0..needed_buffer_start, "");
+            let needed_buffer_start = *ptr - max_needed_buffer(state, *ptr);
+            // occasionally the ptr ends up further beyond the buffer size - that's okay,
+            // we'll just delete what is available, and worry about the rest later
+            let needed_buffer_start = cmp::min(needed_buffer_start, buffer.len() - 1);
+            buffer.splice(0..needed_buffer_start, empty());
             *ptr -= needed_buffer_start;
             Ok(Some(response))
         } else {
@@ -305,21 +304,21 @@ mod tests {
     #[test]
     fn can_parse_numbers_from_redis_response() {
         let mut parser = ResponseParser::new();
-        parser.feed(":42\r\n");
+        parser.feed(":42\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(42))), parser.get_response());
     }
 
     #[quickcheck]
     fn qc_can_parse_any_number_from_redis_response(num: i64) {
         let mut parser = ResponseParser::new();
-        parser.feed(&format!(":{}\r\n", num));
+        parser.feed(format!(":{}\r\n", num).as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(num))), parser.get_response());
     }
 
     #[test]
     fn can_parse_multiple_numbers_in_a_row() {
         let mut parser = ResponseParser::new();
-        parser.feed(":42\r\n:123\r\n");
+        parser.feed(":42\r\n:123\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(42))), parser.get_response());
         assert_eq!(Ok(Some(RedisValue::Integer(123))), parser.get_response());
     }
@@ -327,36 +326,36 @@ mod tests {
     #[test]
     fn parsing_can_be_resumed_at_any_time() {
         let mut parser = ResponseParser::new();
-        parser.feed(":4");
+        parser.feed(":4".as_bytes());
         assert_eq!(Ok(None), parser.get_response());
 
-        parser.feed("12\r");
+        parser.feed("12\r".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(412))), parser.get_response());
 
-        parser.feed("\n:1\r\n");
+        parser.feed("\n:1\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(1))), parser.get_response());
 
-        parser.feed(":");
+        parser.feed(":".as_bytes());
         assert_eq!(Ok(None), parser.get_response());
 
-        parser.feed("412");
+        parser.feed("412".as_bytes());
         assert_eq!(Ok(None), parser.get_response());
 
-        parser.feed("\r\n");
+        parser.feed("\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Integer(412))), parser.get_response());
     }
 
     #[test]
     fn doesnt_fail_on_an_empty_string() {
         let mut parser = ResponseParser::new();
-        parser.feed("");
+        parser.feed("".as_bytes());
         assert_eq!(Ok(None), parser.get_response())
     }
 
     #[test]
     fn can_parse_a_simple_string() {
         let mut parser = ResponseParser::new();
-        parser.feed("+OK\r\n");
+        parser.feed("+OK\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::String("OK".to_string()))),
             parser.get_response()
@@ -371,7 +370,7 @@ mod tests {
         }
 
         let mut parser = ResponseParser::new();
-        parser.feed(&format!("+{}\r\n", text));
+        parser.feed(format!("+{}\r\n", text).as_bytes());
         assert_eq!(Ok(Some(RedisValue::String(text))), parser.get_response());
         TestResult::passed()
     }
@@ -379,7 +378,7 @@ mod tests {
     #[test]
     fn can_parse_an_error() {
         let mut parser = ResponseParser::new();
-        parser.feed("-OK\r\n");
+        parser.feed("-OK\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Error(RedisError::new("OK")))),
             parser.get_response()
@@ -394,7 +393,7 @@ mod tests {
         }
 
         let mut parser = ResponseParser::new();
-        parser.feed(&format!("-{}\r\n", text));
+        parser.feed(format!("-{}\r\n", text).as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Error(RedisError::new(text)))),
             parser.get_response()
@@ -405,7 +404,7 @@ mod tests {
     #[test]
     fn can_parse_a_bulk_string() {
         let mut parser = ResponseParser::new();
-        parser.feed("$2\r\nOK\r\n");
+        parser.feed("$2\r\nOK\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::String("OK".to_string()))),
             parser.get_response()
@@ -418,7 +417,7 @@ mod tests {
         // double check here that it's recognised.  This is currently special cased
         // in the parser.
         let mut parser = ResponseParser::new();
-        parser.feed("$0\r\n\r\n");
+        parser.feed("$0\r\n\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::String("".to_string()))),
             parser.get_response()
@@ -428,7 +427,7 @@ mod tests {
     #[test]
     fn doesnt_fail_on_a_negative_bulk_string_size() {
         let mut parser = ResponseParser::new();
-        parser.feed("$-100\r\n");
+        parser.feed("$-100\r\n".as_bytes());
         assert_eq!(
             Err(ParseError::InvalidBulkStringLength(-100)),
             parser.get_response()
@@ -438,14 +437,14 @@ mod tests {
     #[quickcheck]
     fn qc_can_parse_any_bulk_string(text: String) {
         let mut parser = ResponseParser::new();
-        parser.feed(&format!("${}\r\n{}\r\n", text.len(), text));
+        parser.feed(format!("${}\r\n{}\r\n", text.len(), text).as_bytes());
         assert_eq!(Ok(Some(RedisValue::String(text))), parser.get_response());
     }
 
     #[test]
     fn can_parse_the_null_bulk_string() {
         let mut parser = ResponseParser::new();
-        parser.feed("$-1\r\n");
+        parser.feed("$-1\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Null)), parser.get_response());
     }
 
@@ -460,7 +459,8 @@ mod tests {
              :3\r\n\
              *2\r\n\
              +Foo\r\n\
-             -Bar\r\n",
+             -Bar\r\n"
+                .as_bytes(),
         );
         assert_eq!(
             Ok(Some(RedisValue::Array(vec![
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn can_parse_an_empty_array() {
         let mut parser = ResponseParser::new();
-        parser.feed("*0\r\n");
+        parser.feed("*0\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Array(Vec::new()))),
             parser.get_response()
@@ -491,14 +491,14 @@ mod tests {
     #[test]
     fn can_parse_a_null_array() {
         let mut parser = ResponseParser::new();
-        parser.feed("*-1\r\n");
+        parser.feed("*-1\r\n".as_bytes());
         assert_eq!(Ok(Some(RedisValue::Null)), parser.get_response());
     }
 
     #[test]
     fn doesnt_fail_on_a_negative_array_size() {
         let mut parser = ResponseParser::new();
-        parser.feed("*-100\r\n");
+        parser.feed("*-100\r\n".as_bytes());
         assert_eq!(
             Err(ParseError::InvalidArrayLength(-100)),
             parser.get_response()
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn doesnt_fail_with_array_of_one_zero_int() {
         let mut parser = ResponseParser::new();
-        parser.feed("*1\r\n:0\r\n");
+        parser.feed("*1\r\n:0\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Array(vec![RedisValue::Integer(0),]))),
             parser.get_response()
@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn doesnt_fail_with_array_of_two_zero_ints() {
         let mut parser = ResponseParser::new();
-        parser.feed("*2\r\n:0\r\n:0\r\n");
+        parser.feed("*2\r\n:0\r\n:0\r\n".as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Array(vec![
                 RedisValue::Integer(0),
@@ -539,7 +539,7 @@ mod tests {
         let redis_array = ints.iter().map(|int| RedisValue::Integer(*int)).collect();
 
         let mut parser = ResponseParser::new();
-        parser.feed(&text);
+        parser.feed(text.as_bytes());
         assert_eq!(
             Ok(Some(RedisValue::Array(redis_array))),
             parser.get_response()
@@ -549,7 +549,7 @@ mod tests {
     #[quickcheck]
     fn qc_can_attempt_to_parse_anything_without_panicking(input: String) {
         let mut parser = ResponseParser::new();
-        parser.feed(&input);
+        parser.feed(input.as_bytes());
         loop {
             match parser.get_response() {
                 Ok(Some(_)) => continue,

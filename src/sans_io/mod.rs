@@ -1,3 +1,4 @@
+mod redis_impl;
 mod response_parser;
 
-pub struct Redis {}
+pub use redis_impl::RedisSansEvent;

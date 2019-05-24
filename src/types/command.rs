@@ -26,19 +26,19 @@ impl Command {
         }
     }
 
-    pub fn with_arg(&mut self, argument: impl Into<RedisArg>) -> &mut Self {
+    pub fn with_arg(mut self, argument: impl Into<RedisArg>) -> Self {
         self.args.push(argument.into().0);
         self
     }
 
-    pub fn get_command_string(&self) -> String {
+    pub(crate) fn get_command_string(&self) -> Vec<u8> {
         let mut result = self.name.clone();
         for arg in &(self.args) {
             result.push_str(" ");
             result.push_str(arg);
         }
 
-        result
+        result.into()
     }
 }
 
@@ -152,11 +152,23 @@ mod tests {
 
     #[test]
     fn can_append_args_of_a_variety_of_types() {
-        let mut cmd = Command::cmd("MY_CMD");
-        cmd.with_arg(1);
-        cmd.with_arg("test");
-        cmd.with_arg("String".to_string());
-        cmd.with_arg(false);
-        cmd.with_arg(3.4);
+        let cmd = Command::cmd("MY_CMD")
+            .with_arg(1)
+            .with_arg("test")
+            .with_arg("String".to_string())
+            .with_arg(false)
+            .with_arg(3.4);
+
+        assert_eq!(cmd.name, "MY_CMD".to_string());
+        assert_eq!(
+            cmd.args,
+            vec![
+                "1".to_string(),
+                "test".to_string(),
+                "String".to_string(),
+                "false".to_string(),
+                "3.4".to_string()
+            ]
+        )
     }
 }

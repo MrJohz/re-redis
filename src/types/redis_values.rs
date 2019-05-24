@@ -1,6 +1,5 @@
 use std::convert::TryFrom;
 use std::error::Error;
-use std::string::ParseError;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct RedisError {
