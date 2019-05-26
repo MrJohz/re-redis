@@ -38,6 +38,7 @@ impl Command {
             result.push_str(arg);
         }
 
+        result.push_str("\r\n");
         result.into()
     }
 }
