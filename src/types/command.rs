@@ -1,4 +1,4 @@
-use crate::RedisValue;
+use crate::types::redis_values::RedisResult;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 
@@ -90,7 +90,7 @@ create_convert_to_redis_arg_impl! {&str, default}
 create_convert_to_redis_arg_impl! {String, input => input}
 
 pub trait StructuredCommand {
-    type Output: TryFrom<RedisValue>;
+    type Output: TryFrom<RedisResult>;
 }
 
 macro_rules! create_structured_command {

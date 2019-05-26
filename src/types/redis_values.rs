@@ -2,11 +2,11 @@ use std::convert::TryFrom;
 use std::error::Error;
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct RedisError {
+pub struct RedisErrorValue {
     contents: String,
 }
 
-impl RedisError {
+impl RedisErrorValue {
     pub(crate) fn new(contents: impl Into<String>) -> Self {
         Self {
             contents: contents.into(),
@@ -23,17 +23,24 @@ impl RedisError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum RedisValue {
+pub enum RedisResult {
     String(String),
     Integer(i64),
-    Array(Vec<RedisValue>),
-    Error(RedisError), // use a string for now, can be changed to a unique RedisError enum
+    Error(RedisErrorValue),
+    Array(Vec<RedisResult>),
     Null,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RedisValue {
+    String(String),
+    Integer(i64),
+    Array(Vec<Option<RedisValue>>),
+}
+
 pub enum ConversionError {
-    NoConversionTypeMatch { value: RedisValue },
-    RedisReturnedError { error: RedisError },
+    NoConversionTypeMatch { value: Option<RedisValue> },
+    RedisReturnedError { error: RedisErrorValue },
     CannotParseStringResponse { error: Box<Error> },
 }
 
@@ -41,139 +48,158 @@ macro_rules! create_try_from_impl {
     ($destination:ty; $value:ident => {
         $($pattern:pat => $result:expr,)+
     }) => {
-        impl TryFrom<RedisValue> for $destination {
+        impl TryFrom<RedisResult> for $destination {
             type Error = ConversionError;
 
-            fn try_from($value: RedisValue) -> Result<Self, Self::Error> {
+            fn try_from($value: RedisResult) -> Result<Self, Self::Error> {
                 match $value {
                     $($pattern => $result,)*
-                    RedisValue::Error(error) => Err(ConversionError::RedisReturnedError { error }),
-                    _ => Err(ConversionError::NoConversionTypeMatch { value: $value }),
+                    RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+                    _ => Err(ConversionError::NoConversionTypeMatch { value: Option::try_from($value).unwrap() }),
                 }
             }
         }
     };
 }
 
-impl TryFrom<RedisValue> for () {
+impl TryFrom<RedisResult> for Option<RedisValue> {
+    type Error = RedisErrorValue;
+
+    fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
+        match r {
+            RedisResult::String(string) => Ok(Some(RedisValue::String(string))),
+            RedisResult::Integer(int) => Ok(Some(RedisValue::Integer(int))),
+            RedisResult::Array(array) => Ok(Some(RedisValue::Array(
+                array
+                    .into_iter()
+                    .map(|result| Option::try_from(result))
+                    .collect::<Result<_, _>>()?,
+            ))),
+            RedisResult::Null => Ok(None),
+            RedisResult::Error(error) => Err(error),
+        }
+    }
+}
+
+impl TryFrom<RedisResult> for () {
     type Error = ConversionError;
 
-    fn try_from(r: RedisValue) -> Result<Self, Self::Error> {
+    fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
         match r {
-            RedisValue::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
             _ => Ok(()),
         }
     }
 }
 
 create_try_from_impl! { Option<String>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::String(text) => Ok(Some(text)),
+    RedisResult::Null => Ok(None),
+    RedisResult::String(text) => Ok(Some(text)),
 }}
 
 create_try_from_impl! { Option<isize>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as isize)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as isize)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<i64>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<i32>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as i32)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as i32)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<i16>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as i16)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as i16)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<i8>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as i8)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as i8)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<usize>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as usize)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as usize)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<u64>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as u64)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as u64)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<u32>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as u32)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as u32)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<u16>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as u16)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as u16)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<u8>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as u8)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as u8)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<f64>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as f64)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as f64)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
 }}
 
 create_try_from_impl! { Option<f32>; value => {
-    RedisValue::Null => Ok(None),
-    RedisValue::Integer(int) => Ok(Some(int as f32)),
-    RedisValue::String(text) => Ok(Some(text
+    RedisResult::Null => Ok(None),
+    RedisResult::Integer(int) => Ok(Some(int as f32)),
+    RedisResult::String(text) => Ok(Some(text
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
@@ -185,7 +211,7 @@ mod tests {
 
     #[test]
     fn redis_error_contains_correct_two_parts() {
-        let error = RedisError::new("TEST This tests that the error struct works");
+        let error = RedisErrorValue::new("TEST This tests that the error struct works");
 
         assert_eq!(Some("TEST"), error.kind());
         assert_eq!(
