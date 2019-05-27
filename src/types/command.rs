@@ -141,4 +141,14 @@ mod tests {
             ]
         )
     }
+
+    #[test]
+    fn returns_the_correct_command_string_for_an_arbitrary_command() {
+        let cmd = Command::cmd("MYCMD").with_arg(120).with_arg("test");
+
+        assert_eq!(
+            "MYCMD 120 test\r\n",
+            String::from_utf8(cmd.into_bytes()).unwrap()
+        );
+    }
 }
