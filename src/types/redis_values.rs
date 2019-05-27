@@ -38,6 +38,7 @@ pub enum RedisValue {
     Array(Vec<Option<RedisValue>>),
 }
 
+#[derive(Debug)]
 pub enum ConversionError {
     NoConversionTypeMatch { value: Option<RedisValue> },
     RedisReturnedError { error: RedisErrorValue },
@@ -63,7 +64,7 @@ macro_rules! create_try_from_impl {
 }
 
 impl TryFrom<RedisResult> for Option<RedisValue> {
-    type Error = RedisErrorValue;
+    type Error = ConversionError;
 
     fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
         match r {
@@ -76,7 +77,7 @@ impl TryFrom<RedisResult> for Option<RedisValue> {
                     .collect::<Result<_, _>>()?,
             ))),
             RedisResult::Null => Ok(None),
-            RedisResult::Error(error) => Err(error),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
         }
     }
 }

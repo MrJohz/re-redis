@@ -1,8 +1,14 @@
 use crate::types::redis_values::RedisResult;
+use crate::RedisValue;
 use std::convert::TryFrom;
-use std::marker::PhantomData;
 
-#[derive(Clone)]
+pub trait StructuredCommand {
+    type Output: TryFrom<RedisResult>;
+
+    fn into_bytes(self) -> Vec<u8>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Command {
     pub(self) name: String,
     pub(self) args: Vec<String>,
@@ -30,9 +36,13 @@ impl Command {
         self.args.push(argument.into().0);
         self
     }
+}
 
-    pub(crate) fn get_command_string(&self) -> Vec<u8> {
-        let mut result = self.name.clone();
+impl StructuredCommand for Command {
+    type Output = Option<RedisValue>;
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut result = self.name;
         for arg in &(self.args) {
             result.push_str(" ");
             result.push_str(arg);
@@ -40,6 +50,95 @@ impl Command {
 
         result.push_str("\r\n");
         result.into()
+    }
+}
+
+pub mod commands {
+    use super::RedisArg;
+    use super::StructuredCommand;
+    use std::marker::PhantomData;
+
+    macro_rules! impl_stuctured_command {
+        (
+            $type_name:ident;
+            $arg_name:ident => $as_bytes:block,
+            $existing_type:ty
+        ) => {
+            impl StructuredCommand for $type_name {
+                type Output = $existing_type;
+
+                fn into_bytes(self) -> Vec<u8> {
+                    let $arg_name = self;
+                    $as_bytes
+                }
+            }
+        };
+        (
+            $type_name:ident;
+            $arg_name:ident => $as_bytes:block,
+            $($existing_type:ty)|+
+        ) => {
+            $(
+                impl StructuredCommand for $type_name<$existing_type> {
+                    type Output = $existing_type;
+
+                    fn into_bytes(self) -> Vec<u8> {
+                        let $arg_name = self;
+                        $as_bytes
+                    }
+                }
+            )*
+        };
+    }
+
+    pub struct Set {
+        key: String,
+        value: String,
+    }
+
+    impl Set {
+        pub(self) fn new(key: impl Into<String>, value: impl Into<RedisArg>) -> Self {
+            Self {
+                key: key.into(),
+                value: value.into().0,
+            }
+        }
+    }
+
+    pub fn set(key: impl Into<String>, value: impl Into<RedisArg>) -> Set {
+        Set::new(key, value)
+    }
+
+    impl_stuctured_command! {Set;
+        this => { format!("SET {} {}\r\n", this.key, this.value).into() },
+        ()
+    }
+
+    pub struct Get<T> {
+        key: String,
+        _t: PhantomData<T>,
+    }
+
+    impl<T> Get<T> {
+        pub(self) fn new(key: impl Into<String>) -> Self {
+            Self {
+                key: key.into(),
+                _t: PhantomData,
+            }
+        }
+    }
+
+    pub fn get<T>(key: impl Into<String>) -> Get<T> {
+        Get::new(key)
+    }
+
+    impl_stuctured_command! {Get;
+        this => { format!("GET {}\r\n", this.key).into() },
+        Option<String> |
+        Option<isize> | Option<i64> | Option<i32> | Option<i16> | Option<i8> |
+        Option<usize> | Option<u64> | Option<u32> | Option<u16> | Option<u8> |
+        Option<f64> | Option<f32>
+
     }
 }
 
@@ -89,47 +188,6 @@ create_convert_to_redis_arg_impl! {char, default}
 
 create_convert_to_redis_arg_impl! {&str, default}
 create_convert_to_redis_arg_impl! {String, input => input}
-
-pub trait StructuredCommand {
-    type Output: TryFrom<RedisResult>;
-}
-
-macro_rules! create_structured_command {
-    (pub $type_name:ident => $existing_type:ty) => {
-        // Note the creation of an unusable enum.  An enum with no members cannot be created.
-        // Supposedly, rustc can (or will eventually be able to) figure this out, and do some
-        // optimisations based on this.  In the meantime, we'll just let the compiler know
-        // that this is allowed to appear like dead code.
-        #[allow(dead_code)]
-        pub enum $type_name { }
-
-        impl StructuredCommand for $type_name {
-            type Output = $existing_type;
-        }
-    };
-    (pub $type_name:ident => $($existing_type:ty)|+) => {
-        // Note that this is *not* an unusable enum, but a struct with a PhantomData element.
-        // Because rustc requires that all structs use every single type parameter given to
-        // them, we need to store a PhantomData to let rustc know that this is being used.  This
-        // means that it will be possible to create this struct, although also very pointless.
-        #[allow(dead_code)]
-        pub struct $type_name<T>(PhantomData<T>);
-
-        $(
-            impl StructuredCommand for $type_name<$existing_type> {
-                type Output = $existing_type;
-            }
-        )*
-    };
-}
-
-create_structured_command! { pub CommandSet => () }
-create_structured_command! { pub CommandGet =>
-    Option<String> |
-    Option<isize> | Option<i64> | Option<i32> | Option<i16> | Option<i8> |
-    Option<usize> | Option<u64> | Option<u32> | Option<u16> | Option<u8> |
-    Option<f64> | Option<f32>
-}
 
 #[cfg(test)]
 mod tests {

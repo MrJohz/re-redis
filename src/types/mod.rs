@@ -1,7 +1,7 @@
 mod command;
-mod redis_values;
 mod errors;
+pub(crate) mod redis_values;
 
-pub use command::{Command, StructuredCommand};
+pub use command::{commands, Command, StructuredCommand};
+pub use errors::RedisError;
 pub use redis_values::{RedisErrorValue, RedisResult, RedisValue};
-pub use errors::{RedisError};
