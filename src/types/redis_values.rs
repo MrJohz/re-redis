@@ -93,6 +93,18 @@ impl TryFrom<RedisResult> for () {
     }
 }
 
+impl TryFrom<RedisResult> for Option<()> {
+    type Error = ConversionError;
+
+    fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
+        match r {
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            RedisResult::Null => Ok(None),
+            _ => Ok(Some(())),
+        }
+    }
+}
+
 create_try_from_impl! { Option<String>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::String(text) => Ok(Some(text)),
@@ -204,6 +216,10 @@ create_try_from_impl! { Option<f32>; value => {
         .parse()
         .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
     )),
+}}
+
+create_try_from_impl! { i64; value => {
+    RedisResult::Integer(int) => Ok(int),
 }}
 
 #[cfg(test)]
