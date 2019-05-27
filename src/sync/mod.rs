@@ -1,10 +1,9 @@
 use crate::sans_io::SansIoClient;
 use crate::types::redis_values::ConversionError;
-use crate::{commands, Command, RedisError, RedisResult, RedisValue, StructuredCommand};
+use crate::{RedisError, RedisResult, StructuredCommand};
 use std::convert::TryFrom;
 use std::io::{BufRead, BufReader, BufWriter, Result as IoResult, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::process::Output;
 use std::thread;
 
 pub struct Client {
@@ -41,25 +40,28 @@ impl Client {
         Ok(Self { parser, writer })
     }
 
-    pub fn issue_command<T, Q>(&mut self, cmd: Q) -> Result<T, RedisError>
+    pub fn issue_command<Cmd>(
+        &mut self,
+        cmd: Cmd,
+    ) -> Result<<Cmd as StructuredCommand>::Output, RedisError>
     where
-        Q: StructuredCommand<Output = T>,
-        T: TryFrom<RedisResult, Error = ConversionError>,
+        Cmd: StructuredCommand,
+        Cmd::Output: TryFrom<RedisResult, Error = ConversionError>,
     {
         let bytes = self.parser.issue_command(cmd);
         self.writer
             .write(&bytes)
             .map_err(RedisError::ConnectionError)?;
         self.writer.flush().map_err(RedisError::ConnectionError)?;
-        self.parser.get_response::<T>()
+        self.parser
+            .get_response::<<Cmd as StructuredCommand>::Output>()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::commands::Get;
-    use crate::Command;
+    use crate::{commands, Command};
 
     #[test]
     fn can_create_new_client_and_issue_command() {
@@ -68,6 +70,6 @@ mod tests {
         dbg!(client.issue_command(Command::cmd("PRINTLN")));
         dbg!(client.issue_command(commands::set("my-test-key", 32)));
         // TODO: tidy these generics up
-        dbg!(client.issue_command::<Option<i64>, Get<Option<i64>>>(commands::get("my-test-key")));
+        dbg!(client.issue_command::<commands::Get<Option<i64>>>(commands::get("my-test-key")));
     }
 }
