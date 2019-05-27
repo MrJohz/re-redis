@@ -1,5 +1,5 @@
 [package]
-name = "re-redis"
+name = "reredis"
 version = "0.1.0"
 authors = ["Jonathan <jofr@spreadshirt.net>"]
 edition = "2018"

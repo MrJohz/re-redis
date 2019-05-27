@@ -133,56 +133,22 @@ impl Increment {
             by,
         }
     }
-
-    pub fn by(mut self, value: i64) -> Self {
-        self.by = value;
-        self
-    }
-}
-
-pub struct Decrement {
-    key: String,
-    by: i64,
-}
-
-impl Decrement {
-    pub(self) fn new(key: impl Into<String>, by: i64) -> Self {
-        Self {
-            key: key.into(),
-            by,
-        }
-    }
-
-    pub fn by(mut self, value: i64) -> Self {
-        self.by = -value;
-        self
-    }
 }
 
 pub fn incr(key: impl Into<String>) -> Increment {
     Increment::new(key, 1)
 }
-
-pub fn decr(key: impl Into<String>) -> Decrement {
-    Decrement::new(key, -1)
+pub fn incr_by(key: impl Into<String>, by: i64) -> Increment {
+    Increment::new(key, by)
+}
+pub fn decr(key: impl Into<String>) -> Increment {
+    Increment::new(key, -1)
+}
+pub fn decr_by(key: impl Into<String>, by: i64) -> Increment {
+    Increment::new(key, -by)
 }
 
 impl_stuctured_command! {Increment;
-    this => {
-        if this.by == 1 {
-            format!("INCR {}\r\n", this.key).into()
-        } else if this.by == -1 {
-            format!("DECR {}\r\n", this.key).into()
-        } else if this.by >= 0 {
-            format!("INCRBY {} {}\r\n", this.key, this.by).into()
-        } else {
-            format!("DECRBY {} {}\r\n", this.key, -this.by).into()
-        }
-    },
-    i64
-}
-
-impl_stuctured_command! {Decrement;
     this => {
         if this.by == 1 {
             format!("INCR {}\r\n", this.key).into()
@@ -293,8 +259,8 @@ mod tests {
     }
 
     #[test]
-    fn incr_command_increments_by_other_numbers_when_given() {
-        let cmd = incr("my-first-key").by(120);
+    fn incr_by_command_increments_by_other_numbers_when_given() {
+        let cmd = incr_by("my-first-key", 120);
 
         assert_eq!(
             String::from_utf8(cmd.into_bytes()).unwrap(),
@@ -303,8 +269,8 @@ mod tests {
     }
 
     #[test]
-    fn incr_command_decrements_if_given_key_is_negative() {
-        let cmd = incr("my-first-key").by(-120);
+    fn decr_by_command_decrements_by_given_value() {
+        let cmd = decr_by("my-first-key", 120);
 
         assert_eq!(
             String::from_utf8(cmd.into_bytes()).unwrap(),
@@ -313,52 +279,12 @@ mod tests {
     }
 
     #[test]
-    fn incr_command_decrements_if_given_key_is_precisely_minus_one() {
-        let cmd = incr("my-first-key").by(-1);
-
-        assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
-            "DECR my-first-key\r\n"
-        );
-    }
-
-    #[test]
-    fn decr_command_decrements_by_one_by_default() {
+    fn decr_command_decrements_by_one() {
         let cmd = decr("my-first-key");
 
         assert_eq!(
             String::from_utf8(cmd.into_bytes()).unwrap(),
             "DECR my-first-key\r\n"
-        );
-    }
-
-    #[test]
-    fn decr_command_increments_by_other_numbers_when_given() {
-        let cmd = decr("my-first-key").by(120);
-
-        assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
-            "DECRBY my-first-key 120\r\n"
-        );
-    }
-
-    #[test]
-    fn decr_command_increments_if_given_key_is_negative() {
-        let cmd = decr("my-first-key").by(-120);
-
-        assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
-            "INCRBY my-first-key 120\r\n"
-        );
-    }
-
-    #[test]
-    fn decr_command_increments_if_given_key_is_precisely_minus_one() {
-        let cmd = decr("my-first-key").by(-1);
-
-        assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
-            "INCR my-first-key\r\n"
         );
     }
 }

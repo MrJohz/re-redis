@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, BufWriter, Result as IoResult, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::thread;
 
+#[derive(Debug)]
 pub struct Client {
     writer: BufWriter<TcpStream>,
     parser: SansIoClient,
