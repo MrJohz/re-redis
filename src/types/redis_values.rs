@@ -72,7 +72,7 @@ impl TryFrom<RedisResult> for Option<RedisValue> {
             RedisResult::Array(array) => Ok(Some(RedisValue::Array(
                 array
                     .into_iter()
-                    .map(|result| Option::try_from(result))
+                    .map(Option::try_from)
                     .collect::<Result<_, _>>()?,
             ))),
             RedisResult::Null => Ok(None),

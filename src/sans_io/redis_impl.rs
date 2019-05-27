@@ -1,8 +1,8 @@
 use crate::sans_io::response_parser::{ParseError, ResponseParser};
 use crate::{Command, RedisError, RedisValue};
 use std::convert::TryInto;
+use std::io::Result as IoResult;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use void::Void; // TODO: replace this with the ! type when it's stabilised
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisSansEvent {
@@ -15,12 +15,12 @@ pub enum RedisSansEvent {
 pub struct Client {
     has_errored: bool,
     has_finished: bool,
-    receive_bytes: Receiver<Vec<u8>>,
+    receive_bytes: Receiver<IoResult<Vec<u8>>>,
     parser: ResponseParser,
 }
 
 impl Client {
-    pub fn new() -> (Self, Sender<Vec<u8>>) {
+    pub fn new() -> (Self, Sender<IoResult<Vec<u8>>>) {
         let (tx_bytes, rx_bytes) = channel();
         (
             Self {
@@ -41,13 +41,18 @@ impl Client {
         cmd.get_command_string()
     }
 
-    pub fn get_response(&mut self) -> Result<Option<RedisValue>, RedisError<Void>> {
+    pub fn get_response(&mut self) -> Result<Option<RedisValue>, RedisError> {
         loop {
             match self.parser.get_response() {
                 Ok(Some(value)) => return value.try_into().map_err(RedisError::RedisReturnedError),
                 Err(error) => return Err(RedisError::ProtocolParseError(error)),
                 Ok(None) => {
-                    self.parser.feed(&self.receive_bytes.recv().unwrap());
+                    let bytes = self
+                        .receive_bytes
+                        .recv()
+                        .map_err(RedisError::InternalConnectionError)?
+                        .map_err(RedisError::ConnectionError)?;
+                    self.parser.feed(&bytes);
                 }
             }
         }
