@@ -61,30 +61,24 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
-    // TODO: reimplement these tests
+    use super::*;
+    use crate::{Command, RedisValue};
 
-    //    use super::*;
-    //    use crate::{Command, RedisValue};
-    //    use std::sync::mpsc::channel;
+    #[test]
+    fn bytes_sent_handler_is_called_when_command_is_issed() {
+        let (client, _) = Client::new();
+        let bytes = client.issue_command(Command::cmd("GET").with_arg("my_favourite_key"));
+        assert_eq!("GET my_favourite_key\r\n".as_bytes(), bytes.as_slice());
+    }
 
-    //    #[test]
-    //    fn bytes_sent_handler_is_called_when_command_is_issed() {
-    //        let (tx, rx) = channel();
-    //        let (_ignored, _) = channel();
-    //
-    //        let mut client = Client::new(_ignored, tx);
-    //        client.issue_command(Command::cmd("GET").with_arg("my_favourite_key"));
-    //
-    //        assert_eq!(Ok(Vec::from("GET my_favourite_key")), rx.try_recv(),);
-    //    }
+    #[test]
+    fn server_response_received_when_redis_value_is_parsed() {
+        let (mut client, send_bytes) = Client::new();
+        send_bytes.send(Ok(":42\r\n".into())).unwrap();
 
-    //    #[test]
-    //    fn server_response_received_when_redis_value_is_parsed() {
-    //        let (tx, rx) = channel();
-    //
-    //        let mut client = Client::new(tx);
-    //        client.feed_data(":42\r\n".as_bytes());
-    //
-    //        assert_eq!(Ok(Ok(Some(RedisValue::Integer(42)))), rx.try_recv(),);
-    //    }
+        assert_eq!(
+            Some(RedisValue::Integer(42)),
+            client.get_response().unwrap()
+        );
+    }
 }
