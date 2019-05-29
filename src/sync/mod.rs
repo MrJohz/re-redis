@@ -25,7 +25,10 @@ impl Client {
             loop {
                 match reader.read_line(&mut buffer) {
                     Ok(_) => {
-                        tx_bytes.send(Ok(buffer.clone().into())).unwrap();
+                        let result = tx_bytes.send(Ok(buffer.clone().into()));
+                        if result.is_err() {
+                            return;
+                        }
                         buffer.clear();
                     }
                     Err(err) => {
@@ -36,6 +39,7 @@ impl Client {
             }
 
             // TODO: figure out why this closes when the tests are finished
+            //   Or just generally figure out cleanup
         });
 
         Ok(Self { parser, writer })
@@ -56,21 +60,5 @@ impl Client {
         self.writer.flush().map_err(RedisError::ConnectionError)?;
         self.parser
             .get_response::<<Cmd as StructuredCommand>::Output>()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{commands, Command};
-
-    #[test]
-    fn can_create_new_client_and_issue_command() {
-        let mut client = Client::new("localhost:6379").unwrap();
-        dbg!(client.issue_command(Command::cmd("GET").with_arg("mykey")));
-        dbg!(client.issue_command(Command::cmd("PRINTLN")));
-        dbg!(client.issue_command(commands::set("my-test-key", 32)));
-        // TODO: tidy these generics up
-        dbg!(client.issue_command::<commands::Get<Option<i64>>>(commands::get("my-test-key")));
     }
 }

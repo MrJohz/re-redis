@@ -184,7 +184,8 @@ fn parse_response(
                     let data = from_utf8(&data[*start..*ptr])
                         .map_err(ParseError::CannotConvertToUtf8)
                         .map(|string| Some(RedisResult::String(string.to_string())));
-                    *ptr += 1;
+                    *ptr += 2;
+                    *state = ResponseParserState::Waiting;
                     return data;
                 }
             }
@@ -557,5 +558,24 @@ mod tests {
                 Err(_) => break,   // parsing encountered an error
             }
         }
+    }
+
+    #[test]
+    fn returning_ok_then_a_value_then_null() {
+        let mut parser = ResponseParser::new();
+        parser.feed("+OK\r\n$1\r\n0\r\n$-1\r\n".as_bytes());
+
+        assert_eq!(
+            Some(RedisResult::String("OK".into())),
+            parser.get_response().unwrap(),
+        );
+
+        assert_eq!(
+            Some(RedisResult::String("0".into())),
+            parser.get_response().unwrap(),
+        );
+
+        // this is where the weird bug happens
+        assert_eq!(Some(RedisResult::Null), parser.get_response().unwrap());
     }
 }

@@ -1,7 +1,17 @@
 use crate::types::command::RedisArg;
 use crate::types::command::StructuredCommand;
+use crate::utils::number_length;
 use std::marker::PhantomData;
 use std::time::Duration;
+
+fn validate_key(key: impl Into<String>) -> String {
+    let key = key.into();
+    if key.len() > 512 * 1000 * 1000 {
+        // 512 MB
+        panic!("key is too large (over 512 MB");
+    }
+    key
+}
 
 macro_rules! impl_stuctured_command {
         (
@@ -43,9 +53,9 @@ pub struct Set {
 }
 
 impl Set {
-    pub(self) fn new(key: impl Into<String>, value: impl Into<RedisArg>) -> Self {
+    pub(self) fn new(key: String, value: impl Into<RedisArg>) -> Self {
         Self {
-            key: key.into(),
+            key,
             expiry: None,
             value: value.into().0,
         }
@@ -84,21 +94,52 @@ pub struct SetIfExists {
 
 impl SetIfExists {
     pub fn with_expiry(mut self, duration: Duration) -> Self {
+        if cfg!(debug_assertions) && duration == Duration::from_millis(0) {
+            panic!("duration cannot be 0 in length");
+        }
+
         self.expiry.replace(duration);
         self
     }
 }
 
 pub fn set(key: impl Into<String>, value: impl Into<RedisArg>) -> Set {
-    Set::new(key, value)
+    Set::new(validate_key(key), value)
 }
 
-impl_stuctured_command! {Set;
-    this => { match this.expiry {
-        Some(duration) => format!("SET {} {} PX {}\r\n", this.key, this.value, duration.as_millis()).into(),
-        None => format!("SET {} {}\r\n", this.key, this.value).into(),
-    }},
-    ()
+impl StructuredCommand for Set {
+    type Output = ();
+
+    fn into_bytes(self) -> Vec<u8> {
+        match self.expiry {
+            Some(duration) => format!(
+                "*5\r\n\
+                 $3\r\nSET\r\n\
+                 ${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n\
+                 $2\r\nPX\r\n\
+                 ${expiry_length}\r\n{expiry}\r\n",
+                key = self.key,
+                key_length = self.key.len(),
+                value = self.value,
+                value_length = self.value.len(),
+                expiry_length = number_length(duration.as_millis()),
+                expiry = duration.as_millis(),
+            )
+            .into(),
+            None => format!(
+                "*3\r\n\
+                 $3\r\nSET\r\n\
+                 ${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n",
+                key = self.key,
+                key_length = self.key.len(),
+                value = self.value,
+                value_length = self.value.len(),
+            )
+            .into(),
+        }
+    }
 }
 
 impl_stuctured_command! {SetIfExists;
@@ -127,25 +168,22 @@ pub struct Increment {
 }
 
 impl Increment {
-    pub(self) fn new(key: impl Into<String>, by: i64) -> Self {
-        Self {
-            key: key.into(),
-            by,
-        }
+    pub(self) fn new(key: String, by: i64) -> Self {
+        Self { key, by }
     }
 }
 
 pub fn incr(key: impl Into<String>) -> Increment {
-    Increment::new(key, 1)
+    Increment::new(validate_key(key), 1)
 }
 pub fn incr_by(key: impl Into<String>, by: i64) -> Increment {
-    Increment::new(key, by)
+    Increment::new(validate_key(key), by)
 }
 pub fn decr(key: impl Into<String>) -> Increment {
-    Increment::new(key, -1)
+    Increment::new(validate_key(key), -1)
 }
 pub fn decr_by(key: impl Into<String>, by: i64) -> Increment {
-    Increment::new(key, -by)
+    Increment::new(validate_key(key), -by)
 }
 
 impl_stuctured_command! {Increment;
@@ -169,20 +207,23 @@ pub struct Get<T> {
 }
 
 impl<T> Get<T> {
-    pub(self) fn new(key: impl Into<String>) -> Self {
+    pub(self) fn new(key: String) -> Self {
         Self {
-            key: key.into(),
+            key,
             _t: PhantomData,
         }
     }
 }
 
 pub fn get<T>(key: impl Into<String>) -> Get<T> {
-    Get::new(key)
+    Get::new(validate_key(key))
 }
 
 impl_stuctured_command! {Get;
-    this => { format!("GET {}\r\n", this.key).into() },
+    this => { format!(
+        "*2\r\n\
+        $3\r\nGET\r\n\
+        ${}\r\n{}\r\n", this.key.len(), this.key).into() },
     Option<String> |
     Option<isize> | Option<i64> | Option<i32> | Option<i16> | Option<i8> |
     Option<usize> | Option<u64> | Option<u32> | Option<u16> | Option<u8> |
