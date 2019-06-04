@@ -8,18 +8,33 @@ fn validate_key(key: impl Into<String>) -> String {
     let key = key.into();
     if key.len() > 512 * 1000 * 1000 {
         // 512 MB
-        panic!("key is too large (over 512 MB");
+        panic!("key is too large (over 512 MB)");
     }
     key
 }
 
 macro_rules! impl_stuctured_command {
-        (
-            $type_name:ident;
-            $arg_name:ident => $as_bytes:block,
-            $existing_type:ty
-        ) => {
-            impl StructuredCommand for $type_name {
+    (
+        $type_name:ident;
+        $arg_name:ident => $as_bytes:block,
+        $existing_type:ty
+    ) => {
+        impl StructuredCommand for $type_name {
+            type Output = $existing_type;
+
+            fn into_bytes(self) -> Vec<u8> {
+                let $arg_name = self;
+                $as_bytes
+            }
+        }
+    };
+    (
+        $type_name:ident;
+        $arg_name:ident => $as_bytes:block,
+        $($existing_type:ty)|+
+    ) => {
+        $(
+            impl StructuredCommand for $type_name<$existing_type> {
                 type Output = $existing_type;
 
                 fn into_bytes(self) -> Vec<u8> {
@@ -27,24 +42,9 @@ macro_rules! impl_stuctured_command {
                     $as_bytes
                 }
             }
-        };
-        (
-            $type_name:ident;
-            $arg_name:ident => $as_bytes:block,
-            $($existing_type:ty)|+
-        ) => {
-            $(
-                impl StructuredCommand for $type_name<$existing_type> {
-                    type Output = $existing_type;
-
-                    fn into_bytes(self) -> Vec<u8> {
-                        let $arg_name = self;
-                        $as_bytes
-                    }
-                }
-            )*
-        };
-    }
+        )*
+    };
+}
 
 pub struct Set {
     key: String,
@@ -241,7 +241,12 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.into_bytes()).unwrap(),
-            "SET my-first-key 42 PX 400000\r\n"
+            "*5\r\n\
+             $3\r\nSET\r\n\
+             $12\r\nmy-first-key\r\n\
+             $2\r\n42\r\n\
+             $2\r\nPX\r\n\
+             $6\r\n400000\r\n"
         );
     }
 

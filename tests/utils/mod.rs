@@ -41,8 +41,8 @@ impl Drop for RedisRunner {
 
 pub fn load_redis_instance() -> RedisRunner {
     let port = loop {
-        let temp_port = rand::thread_rng().gen_range(6000, 6005);
-        if TcpStream::connect(format!("localhost:{}", temp_port)).is_ok() {
+        let temp_port = rand::thread_rng().gen_range(6000, 6999);
+        if TcpStream::connect(format!("localhost:{}", temp_port)).is_err() {
             break temp_port;
         }
     };
