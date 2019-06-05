@@ -2,7 +2,7 @@ use crate::types::command::RedisArg;
 use crate::types::command::StructuredCommand;
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::utils::number_length;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -13,47 +13,6 @@ fn validate_key(key: impl Into<String>) -> String {
         panic!("key is too large (over 512 MB)");
     }
     key
-}
-
-macro_rules! impl_stuctured_command {
-    (
-        $type_name:ident;
-        $arg_name:ident => $as_bytes:block,
-        $existing_type:ty
-    ) => {
-        impl StructuredCommand for $type_name {
-            type Output = $existing_type;
-
-            fn get_bytes(&self) -> Vec<u8> {
-                let $arg_name = self;
-                $as_bytes
-            }
-
-            fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
-                result.try_into()
-            }
-        }
-    };
-    (
-        $type_name:ident;
-        $arg_name:ident => $as_bytes:block,
-        $($existing_type:ty)|+
-    ) => {
-        $(
-            impl StructuredCommand for $type_name<$existing_type> {
-                type Output = $existing_type;
-
-                fn get_bytes(&self) -> Vec<u8> {
-                    let $arg_name = self;
-                    $as_bytes
-                }
-
-                fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
-                    result.try_into()
-                }
-            }
-        )*
-    };
 }
 
 pub struct Set {
@@ -155,24 +114,51 @@ impl StructuredCommand for Set {
     }
 }
 
-impl_stuctured_command! {SetIfExists;
-    this => {
-        let exists_tag = if this.exists { "XX" } else { "NX" };
-        match this.expiry {
-            Some(duration) => format!("SET {} {} PX {} {}\r\n",
-                this.key,
-                this.value,
-                duration.as_millis(),
-                exists_tag
-            ).into(),
-            None => format!("SET {} {} {}\r\n",
-                this.key,
-                this.value,
-                exists_tag
-            ).into(),
+impl StructuredCommand for SetIfExists {
+    type Output = bool;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let exists_tag = if self.exists { "XX" } else { "NX" };
+        match self.expiry {
+            Some(duration) => format!(
+                "*6\r\n\
+                 $3\r\nSET\r\n\
+                 ${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n\
+                 $2\r\nPX\r\n\
+                 ${expiry_length}\r\n{expiry}\r\n\
+                 $2\r\n{exists_tag}\r\n",
+                key = self.key,
+                key_length = self.key.len(),
+                value = self.value,
+                value_length = self.value.len(),
+                expiry_length = number_length(duration.as_millis()),
+                expiry = duration.as_millis(),
+                exists_tag = exists_tag,
+            ),
+            None => format!(
+                "*4\r\n\
+                 $3\r\nSET\r\n\
+                 ${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n\
+                 $2\r\n{exists_tag}\r\n",
+                key = self.key,
+                key_length = self.key.len(),
+                value = self.value,
+                value_length = self.value.len(),
+                exists_tag = exists_tag,
+            ),
         }
-    },
-    Option<()>
+        .into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        match result {
+            RedisResult::Null => Ok(false),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Ok(true),
+        }
+    }
 }
 
 pub struct Increment {
@@ -199,19 +185,24 @@ pub fn decr_by(key: impl Into<String>, by: i64) -> Increment {
     Increment::new(validate_key(key), -by)
 }
 
-impl_stuctured_command! {Increment;
-    this => {
-        if this.by == 1 {
-            format!("INCR {}\r\n", this.key).into()
-        } else if this.by == -1 {
-            format!("DECR {}\r\n", this.key).into()
-        } else if this.by >= 0 {
-            format!("INCRBY {} {}\r\n", this.key, this.by).into()
+impl StructuredCommand for Increment {
+    type Output = i64;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        if self.by == 1 {
+            format!("INCR {}\r\n", self.key).into()
+        } else if self.by == -1 {
+            format!("DECR {}\r\n", self.key).into()
+        } else if self.by >= 0 {
+            format!("INCRBY {} {}\r\n", self.key, self.by).into()
         } else {
-            format!("DECRBY {} {}\r\n", this.key, -this.by).into()
+            format!("DECRBY {} {}\r\n", self.key, -self.by).into()
         }
-    },
-    i64
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
 }
 
 pub struct Get<T> {
@@ -239,8 +230,11 @@ pub fn get<T>(key: String) -> Get<T> {
     Get::new(validate_key(key))
 }
 
-impl StructuredCommand for Get<String> {
-    type Output = Option<String>;
+impl<T> StructuredCommand for Get<T>
+where
+    Option<T>: TryFrom<RedisResult, Error = ConversionError>,
+{
+    type Output = Option<T>;
 
     fn get_bytes(&self) -> Vec<u8> {
         format!(
@@ -263,29 +257,20 @@ pub struct GetWithDefault<T> {
     default: T,
 }
 
-impl StructuredCommand for GetWithDefault<String> {
-    type Output = String;
+impl<T> StructuredCommand for GetWithDefault<T>
+where
+    Option<T>: TryFrom<RedisResult, Error = ConversionError>,
+{
+    type Output = T;
 
     fn get_bytes(&self) -> Vec<u8> {
         self.get_command.get_bytes()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
-        let intermediate: Result<Option<String>, ConversionError> = result.try_into();
+        let intermediate: Result<Option<Self::Output>, ConversionError> = result.try_into();
         intermediate.map(|option| option.unwrap_or(self.default))
     }
-}
-
-impl_stuctured_command! {Get;
-    this => { format!(
-        "*2\r\n\
-        $3\r\nGET\r\n\
-        ${}\r\n{}\r\n", this.key.len(), this.key).into() },
-    Option<String> |
-    Option<isize> | Option<i64> | Option<i32> | Option<i16> | Option<i8> |
-    Option<usize> | Option<u64> | Option<u32> | Option<u16> | Option<u8> |
-    Option<f64> | Option<f32>
-
 }
 
 #[cfg(test)]
@@ -294,7 +279,7 @@ mod tests {
 
     #[test]
     fn get_command_converts_to_bytes_with_correct_type_specification() {
-        let cmd = get::<Option<isize>>("test".into());
+        let cmd = get::<isize>("test".into());
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
@@ -325,7 +310,11 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "SET my-first-key 42 XX\r\n"
+            "*4\r\n\
+             $3\r\nSET\r\n\
+             $12\r\nmy-first-key\r\n\
+             $2\r\n42\r\n\
+             $2\r\nXX\r\n"
         );
     }
 
@@ -337,7 +326,13 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "SET my-first-key 42 PX 1000 XX\r\n"
+            "*6\r\n\
+             $3\r\nSET\r\n\
+             $12\r\nmy-first-key\r\n\
+             $2\r\n42\r\n\
+             $2\r\nPX\r\n\
+             $4\r\n1000\r\n\
+             $2\r\nXX\r\n"
         );
     }
 
@@ -349,7 +344,13 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "SET my-first-key 42 PX 1000 XX\r\n"
+            "*6\r\n\
+             $3\r\nSET\r\n\
+             $12\r\nmy-first-key\r\n\
+             $2\r\n42\r\n\
+             $2\r\nPX\r\n\
+             $4\r\n1000\r\n\
+             $2\r\nXX\r\n"
         );
     }
 
@@ -359,7 +360,11 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "SET my-first-key 42 NX\r\n"
+            "*4\r\n\
+             $3\r\nSET\r\n\
+             $12\r\nmy-first-key\r\n\
+             $2\r\n42\r\n\
+             $2\r\nNX\r\n"
         );
     }
 
