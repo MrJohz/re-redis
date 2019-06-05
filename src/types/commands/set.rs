@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::time::Duration;
 
 use crate::types::command::RedisArg;
@@ -149,6 +149,104 @@ impl StructuredCommand for SetIfExists {
             RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
             _ => Ok(true),
         }
+    }
+}
+
+pub struct SetMany {
+    key_value_pairs: Vec<(String, String)>,
+}
+
+impl SetMany {
+    pub fn add(mut self, key: impl Into<String>, value: impl Into<RedisArg>) -> Self {
+        self.key_value_pairs.push((key.into(), value.into().0));
+        self
+    }
+
+    pub fn with_pairs(mut self, pairs: Vec<(String, String)>) -> Self {
+        self.key_value_pairs = pairs;
+        self
+    }
+
+    pub fn if_none_exists(self) -> SetManyIfExists {
+        SetManyIfExists {
+            key_value_pairs: self.key_value_pairs,
+        }
+    }
+}
+
+impl StructuredCommand for SetMany {
+    type Output = ();
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut header = format!(
+            "*{msg_size}\r\n\
+             $4\r\nMSET\r\n",
+            msg_size = (self.key_value_pairs.len() * 2) + 1,
+        );
+
+        for (key, value) in &self.key_value_pairs {
+            header.push_str(&format!(
+                "${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n",
+                key = key,
+                key_length = key.len(),
+                value = value,
+                value_length = value.len(),
+            ));
+        }
+
+        header.into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
+}
+
+pub struct SetManyIfExists {
+    key_value_pairs: Vec<(String, String)>,
+}
+
+impl StructuredCommand for SetManyIfExists {
+    type Output = bool;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut header = format!(
+            "*{msg_size}\r\n\
+             $6\r\nMSETNX\r\n",
+            msg_size = (self.key_value_pairs.len() * 2) + 1,
+        );
+
+        for (key, value) in &self.key_value_pairs {
+            header.push_str(&format!(
+                "${key_length}\r\n{key}\r\n\
+                 ${value_length}\r\n{value}\r\n",
+                key = key,
+                key_length = key.len(),
+                value = value,
+                value_length = value.len(),
+            ));
+        }
+
+        header.into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        dbg!(&result);
+        match result {
+            RedisResult::Integer(0) => Ok(false),
+            RedisResult::Integer(1) => Ok(true),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: Option::try_from(result).unwrap(),
+            }),
+        }
+    }
+}
+
+pub fn mset() -> SetMany {
+    SetMany {
+        key_value_pairs: Vec::new(),
     }
 }
 
