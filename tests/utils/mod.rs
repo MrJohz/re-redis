@@ -6,6 +6,12 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+lazy_static! {
+    static ref GLOBAL_LOCK: Mutex<()> = Mutex::new(());
+}
+
 #[derive(Debug)]
 pub struct RedisRunner {
     process: Child,
@@ -29,6 +35,7 @@ impl Drop for RedisRunner {
 }
 
 pub fn load_redis_instance() -> RedisRunner {
+    let _lock = GLOBAL_LOCK.lock();
     let port = loop {
         let temp_port = rand::thread_rng().gen_range(6000, 6999);
         if TcpStream::connect(format!("localhost:{}", temp_port)).is_err() {
@@ -53,19 +60,12 @@ pub fn load_redis_instance() -> RedisRunner {
     loop {
         if process.try_wait().unwrap().is_some() {
             let mut stdout_buffer = String::new();
-            let mut stderr_buffer = String::new();
             process
                 .stdout
                 .unwrap()
                 .read_to_string(&mut stdout_buffer)
                 .unwrap();
-            process
-                .stderr
-                .unwrap()
-                .read_to_string(&mut stderr_buffer)
-                .unwrap();
             dbg!(stdout_buffer);
-            dbg!(stderr_buffer);
             panic!("redis-server has already closed, cannot connect to it")
         }
         if TcpStream::connect(&connection_string).is_err() {
