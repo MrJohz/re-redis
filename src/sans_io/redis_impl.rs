@@ -1,7 +1,6 @@
 use crate::redis_values::ConversionError;
 use crate::sans_io::response_parser::{ParseError, ResponseParser};
-use crate::{RedisError, RedisResult, RedisValue, StructuredCommand};
-use std::convert::{TryFrom, TryInto};
+use crate::{RedisError, RedisValue, StructuredCommand};
 use std::io::Result as IoResult;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
@@ -34,32 +33,37 @@ impl Client {
         )
     }
 
-    pub fn issue_command(&self, cmd: impl StructuredCommand) -> Vec<u8> {
+    pub fn issue_command(&self, cmd: &impl StructuredCommand) -> Vec<u8> {
         if self.has_finished {
             return Vec::new();
         }
 
-        cmd.into_bytes()
+        cmd.get_bytes()
     }
 
-    pub fn get_response<T>(&mut self) -> Result<T, RedisError>
+    pub fn get_response<T>(
+        &mut self,
+        converter: T,
+    ) -> Result<<T as StructuredCommand>::Output, RedisError>
     where
-        T: TryFrom<RedisResult, Error = ConversionError>,
+        T: StructuredCommand,
     {
         loop {
             match self.parser.get_response() {
                 Ok(Some(value)) => {
-                    return value.try_into().map_err(|err| match err {
-                        ConversionError::NoConversionTypeMatch { value } => {
-                            RedisError::ConversionError(value)
-                        }
-                        ConversionError::RedisReturnedError { error } => {
-                            RedisError::RedisReturnedError(error)
-                        }
-                        ConversionError::CannotParseStringResponse { error } => {
-                            RedisError::StringParseError(error)
-                        }
-                    })
+                    return converter
+                        .convert_redis_result(value)
+                        .map_err(|err| match err {
+                            ConversionError::NoConversionTypeMatch { value } => {
+                                RedisError::ConversionError(value)
+                            }
+                            ConversionError::RedisReturnedError { error } => {
+                                RedisError::RedisReturnedError(error)
+                            }
+                            ConversionError::CannotParseStringResponse { error } => {
+                                RedisError::StringParseError(error)
+                            }
+                        })
                 }
                 Err(error) => return Err(RedisError::ProtocolParseError(error)),
                 Ok(None) => {

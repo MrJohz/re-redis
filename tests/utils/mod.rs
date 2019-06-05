@@ -1,4 +1,5 @@
 use rand::Rng;
+use std::io::Read;
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -16,18 +17,6 @@ pub struct RedisRunner {
 impl RedisRunner {
     pub fn address(&self) -> &str {
         &self.connection_string
-    }
-    fn wait_for_connection(&mut self) {
-        loop {
-            if self.process.try_wait().unwrap().is_some() {
-                panic!("redis-server has already closed, cannot connect to it")
-            }
-            if TcpStream::connect(&self.connection_string).is_err() {
-                thread::sleep(Duration::from_millis(100));
-            } else {
-                return;
-            }
-        }
     }
 }
 
@@ -52,7 +41,7 @@ pub fn load_redis_instance() -> RedisRunner {
         .tempdir()
         .unwrap();
 
-    let process = Command::new("redis-server")
+    let mut process = Command::new("redis-server")
         .args(&["--port", &port.to_string()])
         .args(&["--dir", data_dir.path().to_str().unwrap()])
         .stdout(Stdio::piped())
@@ -61,12 +50,34 @@ pub fn load_redis_instance() -> RedisRunner {
 
     let connection_string = format!("localhost:{}", port);
 
-    let mut runner = RedisRunner {
+    loop {
+        if process.try_wait().unwrap().is_some() {
+            let mut stdout_buffer = String::new();
+            let mut stderr_buffer = String::new();
+            process
+                .stdout
+                .unwrap()
+                .read_to_string(&mut stdout_buffer)
+                .unwrap();
+            process
+                .stderr
+                .unwrap()
+                .read_to_string(&mut stderr_buffer)
+                .unwrap();
+            dbg!(stdout_buffer);
+            dbg!(stderr_buffer);
+            panic!("redis-server has already closed, cannot connect to it")
+        }
+        if TcpStream::connect(&connection_string).is_err() {
+            thread::sleep(Duration::from_millis(100));
+        } else {
+            break;
+        }
+    }
+
+    RedisRunner {
         process,
         data_dir,
         connection_string,
-    };
-
-    runner.wait_for_connection();
-    runner
+    }
 }

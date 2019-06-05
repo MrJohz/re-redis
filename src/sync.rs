@@ -1,7 +1,5 @@
 use crate::sans_io::SansIoClient;
-use crate::types::redis_values::ConversionError;
-use crate::{RedisError, RedisResult, StructuredCommand};
-use std::convert::TryFrom;
+use crate::{RedisError, StructuredCommand};
 use std::io::{BufRead, BufReader, BufWriter, Result as IoResult, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::thread;
@@ -45,20 +43,15 @@ impl Client {
         Ok(Self { parser, writer })
     }
 
-    pub fn issue_command<Cmd>(
-        &mut self,
-        cmd: Cmd,
-    ) -> Result<<Cmd as StructuredCommand>::Output, RedisError>
+    pub fn issue<Cmd>(&mut self, cmd: Cmd) -> Result<<Cmd as StructuredCommand>::Output, RedisError>
     where
         Cmd: StructuredCommand,
-        Cmd::Output: TryFrom<RedisResult, Error = ConversionError>,
     {
-        let bytes = self.parser.issue_command(cmd);
+        let bytes = self.parser.issue_command(&cmd);
         self.writer
             .write(&bytes)
             .map_err(RedisError::ConnectionError)?;
         self.writer.flush().map_err(RedisError::ConnectionError)?;
-        self.parser
-            .get_response::<<Cmd as StructuredCommand>::Output>()
+        self.parser.get_response(cmd)
     }
 }

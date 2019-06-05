@@ -1,11 +1,12 @@
-use crate::types::redis_values::RedisResult;
+use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::RedisValue;
-use std::convert::TryFrom;
+use std::convert::TryInto;
 
 pub trait StructuredCommand {
-    type Output: TryFrom<RedisResult>;
+    type Output;
 
-    fn into_bytes(self) -> Vec<u8>;
+    fn get_bytes(&self) -> Vec<u8>;
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,8 +42,9 @@ impl Command {
 impl StructuredCommand for Command {
     type Output = Option<RedisValue>;
 
-    fn into_bytes(self) -> Vec<u8> {
-        let mut result = self.name;
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut result = String::new();
+        result.push_str(&self.name);
         for arg in &(self.args) {
             result.push_str(" ");
             result.push_str(arg);
@@ -50,6 +52,10 @@ impl StructuredCommand for Command {
 
         result.push_str("\r\n");
         result.into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
     }
 }
 
@@ -148,7 +154,7 @@ mod tests {
 
         assert_eq!(
             "MYCMD 120 test\r\n",
-            String::from_utf8(cmd.into_bytes()).unwrap()
+            String::from_utf8(cmd.get_bytes()).unwrap()
         );
     }
 }

@@ -1,13 +1,15 @@
 use crate::types::command::RedisArg;
 use crate::types::command::StructuredCommand;
+use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::utils::number_length;
+use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::time::Duration;
 
 fn validate_key(key: impl Into<String>) -> String {
     let key = key.into();
     if key.len() > 512 * 1000 * 1000 {
-        // 512 MB
+        // 512 MB, roughly
         panic!("key is too large (over 512 MB)");
     }
     key
@@ -22,9 +24,13 @@ macro_rules! impl_stuctured_command {
         impl StructuredCommand for $type_name {
             type Output = $existing_type;
 
-            fn into_bytes(self) -> Vec<u8> {
+            fn get_bytes(&self) -> Vec<u8> {
                 let $arg_name = self;
                 $as_bytes
+            }
+
+            fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+                result.try_into()
             }
         }
     };
@@ -37,9 +43,13 @@ macro_rules! impl_stuctured_command {
             impl StructuredCommand for $type_name<$existing_type> {
                 type Output = $existing_type;
 
-                fn into_bytes(self) -> Vec<u8> {
+                fn get_bytes(&self) -> Vec<u8> {
                     let $arg_name = self;
                     $as_bytes
+                }
+
+                fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+                    result.try_into()
                 }
             }
         )*
@@ -110,7 +120,7 @@ pub fn set(key: impl Into<String>, value: impl Into<RedisArg>) -> Set {
 impl StructuredCommand for Set {
     type Output = ();
 
-    fn into_bytes(self) -> Vec<u8> {
+    fn get_bytes(&self) -> Vec<u8> {
         match self.expiry {
             Some(duration) => format!(
                 "*5\r\n\
@@ -125,8 +135,7 @@ impl StructuredCommand for Set {
                 value_length = self.value.len(),
                 expiry_length = number_length(duration.as_millis()),
                 expiry = duration.as_millis(),
-            )
-            .into(),
+            ),
             None => format!(
                 "*3\r\n\
                  $3\r\nSET\r\n\
@@ -136,9 +145,13 @@ impl StructuredCommand for Set {
                 key_length = self.key.len(),
                 value = self.value,
                 value_length = self.value.len(),
-            )
-            .into(),
+            ),
         }
+        .into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
     }
 }
 
@@ -213,10 +226,54 @@ impl<T> Get<T> {
             _t: PhantomData,
         }
     }
+
+    pub fn with_default(self, default: T) -> GetWithDefault<T> {
+        GetWithDefault {
+            get_command: self,
+            default,
+        }
+    }
 }
 
-pub fn get<T>(key: impl Into<String>) -> Get<T> {
+pub fn get<T>(key: String) -> Get<T> {
     Get::new(validate_key(key))
+}
+
+impl StructuredCommand for Get<String> {
+    type Output = Option<String>;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        format!(
+            "*2\r\n\
+             $3\r\nGET\r\n\
+             ${}\r\n{}\r\n",
+            self.key.len(),
+            self.key
+        )
+        .into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
+}
+
+pub struct GetWithDefault<T> {
+    get_command: Get<T>,
+    default: T,
+}
+
+impl StructuredCommand for GetWithDefault<String> {
+    type Output = String;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        self.get_command.get_bytes()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        let intermediate: Result<Option<String>, ConversionError> = result.try_into();
+        intermediate.map(|option| option.unwrap_or(self.default))
+    }
 }
 
 impl_stuctured_command! {Get;
@@ -236,11 +293,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn get_command_converts_to_bytes_with_correct_type_specification() {
+        let cmd = get::<Option<isize>>("test".into());
+
+        assert_eq!(
+            String::from_utf8(cmd.get_bytes()).unwrap(),
+            "*2\r\n\
+             $3\r\nGET\r\n\
+             $4\r\ntest\r\n"
+        )
+    }
+
+    #[test]
     fn set_command_converts_to_bytes_with_expiry_data() {
         let cmd = set("my-first-key", 42).with_expiry(Duration::from_secs(400));
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "*5\r\n\
              $3\r\nSET\r\n\
              $12\r\nmy-first-key\r\n\
@@ -255,7 +324,7 @@ mod tests {
         let cmd = set("my-first-key", 42).if_exists();
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "SET my-first-key 42 XX\r\n"
         );
     }
@@ -267,7 +336,7 @@ mod tests {
             .with_expiry(Duration::from_millis(1000));
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "SET my-first-key 42 PX 1000 XX\r\n"
         );
     }
@@ -279,7 +348,7 @@ mod tests {
             .if_exists();
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "SET my-first-key 42 PX 1000 XX\r\n"
         );
     }
@@ -289,7 +358,7 @@ mod tests {
         let cmd = set("my-first-key", 42).if_not_exists();
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "SET my-first-key 42 NX\r\n"
         );
     }
@@ -299,7 +368,7 @@ mod tests {
         let cmd = incr("my-first-key");
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "INCR my-first-key\r\n"
         );
     }
@@ -309,7 +378,7 @@ mod tests {
         let cmd = incr_by("my-first-key", 120);
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "INCRBY my-first-key 120\r\n"
         );
     }
@@ -319,7 +388,7 @@ mod tests {
         let cmd = decr_by("my-first-key", 120);
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "DECRBY my-first-key 120\r\n"
         );
     }
@@ -329,7 +398,7 @@ mod tests {
         let cmd = decr("my-first-key");
 
         assert_eq!(
-            String::from_utf8(cmd.into_bytes()).unwrap(),
+            String::from_utf8(cmd.get_bytes()).unwrap(),
             "DECR my-first-key\r\n"
         );
     }
