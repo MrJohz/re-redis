@@ -185,3 +185,25 @@ fn qc_mget_and_mset_can_work_together(pairs: Vec<(String, i64)>) -> TestResult {
 
     TestResult::passed()
 }
+
+#[test]
+fn getset_returns_null_if_the_key_doesnt_exist_yet() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    let value = client.issue(getset::<i64, _, _>("test-key", 120)).unwrap();
+    assert_eq!(value, None);
+}
+
+#[test]
+fn getset_returns_a_value_if_the_key_has_previously_been_set() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("test-key", "this is a value")).unwrap();
+
+    let value = client
+        .issue(getset("test-key", 120))
+        .unwrap();
+    assert_eq!(value, Some("this is a value".to_string()));
+}

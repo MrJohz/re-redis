@@ -5,6 +5,7 @@ use crate::types::command::RedisArg;
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
 use crate::utils::{number_length, validate_key};
+use std::marker::PhantomData;
 
 pub struct Set {
     key: String,
@@ -252,6 +253,49 @@ impl StructuredCommand for SetManyIfExists {
 pub fn mset() -> SetMany {
     SetMany {
         key_value_pairs: Vec::new(),
+    }
+}
+
+pub struct GetSet<T> {
+    key: String,
+    value: String,
+    _t: PhantomData<T>,
+}
+
+impl<T> StructuredCommand for GetSet<T>
+where
+    RedisResult: TryInto<Option<T>, Error = ConversionError>,
+{
+    type Output = Option<T>;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        format!(
+            "*3\r\n\
+             $6\r\nGETSET\r\n\
+             ${key_length}\r\n{key}\r\n\
+             ${value_length}\r\n{value}\r\n",
+            key_length = self.key.len(),
+            key = self.key,
+            value_length = self.value.len(),
+            value = self.value,
+        )
+        .into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
+}
+
+pub fn getset<T, K, V>(key: K, value: V) -> GetSet<T>
+where
+    K: Into<String>,
+    V: Into<RedisArg>,
+{
+    GetSet {
+        key: key.into(),
+        value: value.into().0,
+        _t: PhantomData,
     }
 }
 

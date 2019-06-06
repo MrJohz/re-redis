@@ -1,4 +1,4 @@
-use crate::sans_io::SansIoClient;
+use crate::sans_io::Client as SansIoClient;
 use crate::{RedisError, StructuredCommand};
 use std::io::{BufRead, BufReader, BufWriter, Result as IoResult, Write};
 use std::net::{TcpStream, ToSocketAddrs};
