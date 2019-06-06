@@ -25,7 +25,7 @@ impl Client {
                     Ok(_) => {
                         let result = tx_bytes.send(Ok(buffer.clone().into()));
                         if result.is_err() {
-                            return;
+                            break;
                         }
                         buffer.clear();
                     }

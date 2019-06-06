@@ -65,7 +65,7 @@ pub fn load_redis_instance() -> RedisRunner {
                 .unwrap()
                 .read_to_string(&mut stdout_buffer)
                 .unwrap();
-            dbg!(stdout_buffer);
+            eprintln!("{}", stdout_buffer);
             panic!("redis-server has already closed, cannot connect to it")
         }
         if TcpStream::connect(&connection_string).is_err() {

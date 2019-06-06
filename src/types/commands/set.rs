@@ -162,8 +162,14 @@ impl SetMany {
         self
     }
 
-    pub fn with_pairs(mut self, pairs: Vec<(String, String)>) -> Self {
-        self.key_value_pairs = pairs;
+    pub fn with_pairs(
+        mut self,
+        pairs: impl IntoIterator<Item = (impl Into<String>, impl Into<RedisArg>)>,
+    ) -> Self {
+        self.key_value_pairs = pairs
+            .into_iter()
+            .map(|(first, second)| (first.into(), second.into().0))
+            .collect();
         self
     }
 
@@ -232,13 +238,12 @@ impl StructuredCommand for SetManyIfExists {
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
-        dbg!(&result);
         match result {
             RedisResult::Integer(0) => Ok(false),
             RedisResult::Integer(1) => Ok(true),
             RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
             _ => Err(ConversionError::NoConversionTypeMatch {
-                value: Option::try_from(result).unwrap(),
+                value: Option::try_from(result)?,
             }),
         }
     }

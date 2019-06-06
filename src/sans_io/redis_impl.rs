@@ -17,6 +17,7 @@ pub struct Client {
     has_finished: bool,
     receive_bytes: Receiver<IoResult<Vec<u8>>>,
     parser: ResponseParser,
+    count: u128,
 }
 
 impl Client {
@@ -28,6 +29,7 @@ impl Client {
                 has_errored: false,
                 receive_bytes: rx_bytes,
                 parser: ResponseParser::new(),
+                count: 0,
             },
             tx_bytes,
         )
@@ -63,7 +65,7 @@ impl Client {
                             ConversionError::CannotParseStringResponse { error } => {
                                 RedisError::StringParseError(error)
                             }
-                        })
+                        });
                 }
                 Err(error) => return Err(RedisError::ProtocolParseError(error)),
                 Ok(None) => {
@@ -72,6 +74,7 @@ impl Client {
                         .recv()
                         .map_err(RedisError::InternalConnectionError)?
                         .map_err(RedisError::ConnectionError)?;
+                    self.count += 1;
                     self.parser.feed(&bytes);
                 }
             }

@@ -49,12 +49,12 @@ fn max_needed_buffer(state: &ResponseParserState, current: usize) -> usize {
     match state {
         ResponseParserState::Waiting => 0,
         ResponseParserState::Errored => 0,
-        ResponseParserState::ParsingInteger { start } => current - start,
-        ResponseParserState::ParsingSimpleString { start } => current - start,
-        ResponseParserState::ParsingError { start } => current - start,
-        ResponseParserState::ParsingBulkStringSize { start } => current - start,
-        ResponseParserState::ParsingBulkString { start, .. } => current - start,
-        ResponseParserState::ParsingArraySize { start } => current - start,
+        ResponseParserState::ParsingInteger { start } => current - *start,
+        ResponseParserState::ParsingSimpleString { start } => current - *start,
+        ResponseParserState::ParsingError { start } => current - *start,
+        ResponseParserState::ParsingBulkStringSize { start } => current - *start,
+        ResponseParserState::ParsingBulkString { start, .. } => current - *start,
+        ResponseParserState::ParsingArraySize { start } => current - *start,
         ResponseParserState::ParsingArray { cur_state, .. } => {
             max_needed_buffer(cur_state, current)
         }
@@ -106,6 +106,7 @@ fn parse_response(
                         return Err(ParseError::InvalidResponseTypePrefix(any));
                     }
                 };
+                *ptr += 1;
             }
             ResponseParserState::ParsingInteger { start } => {
                 match parse_integer(data, *start, ptr) {
@@ -118,7 +119,9 @@ fn parse_response(
                         *state = ResponseParserState::Errored;
                         return Err(err);
                     }
-                    None => {}
+                    None => {
+                        *ptr += 1;
+                    }
                 }
             }
             ResponseParserState::ParsingSimpleString { start } => {
@@ -132,7 +135,9 @@ fn parse_response(
                         *state = ResponseParserState::Errored;
                         return Err(err);
                     }
-                    None => {}
+                    None => {
+                        *ptr += 1;
+                    }
                 }
             }
             ResponseParserState::ParsingError { start } => {
@@ -146,7 +151,9 @@ fn parse_response(
                         *state = ResponseParserState::Errored;
                         return Err(err);
                     }
-                    None => {}
+                    None => {
+                        *ptr += 1;
+                    }
                 }
             }
             ResponseParserState::ParsingBulkStringSize { start } => {
@@ -176,7 +183,9 @@ fn parse_response(
                         *state = ResponseParserState::Errored;
                         return Err(err);
                     }
-                    None => {}
+                    None => {
+                        *ptr += 1;
+                    }
                 }
             }
             ResponseParserState::ParsingBulkString { start, size } => {
@@ -187,7 +196,10 @@ fn parse_response(
                     *ptr += 2;
                     *state = ResponseParserState::Waiting;
                     return data;
+                } else if *start + *size < *ptr {
+                    unreachable!("The current position pointer is beyond the end of the string we are trying to parser.  This is Bad News.")
                 }
+                *ptr += 1;
             }
             ResponseParserState::ParsingArraySize { start } => {
                 match parse_integer(data, *start, ptr) {
@@ -197,9 +209,6 @@ fn parse_response(
                             elements: Vec::with_capacity(int as usize),
                             cur_state: Box::new(ResponseParserState::Waiting),
                         };
-                        // skip the ptr increment at the end of each loop iteration,
-                        // jump straight to parsing the first element of this array
-                        continue;
                     }
                     Some(Ok(0)) => {
                         *ptr += 2;
@@ -219,7 +228,9 @@ fn parse_response(
                         *state = ResponseParserState::Errored;
                         return Err(err);
                     }
-                    None => {}
+                    None => {
+                        *ptr += 1;
+                    }
                 }
             }
             ResponseParserState::ParsingArray {
@@ -236,14 +247,10 @@ fn parse_response(
                         } else {
                             panic!("This point should be unreachable");
                         }
-                    } else {
-                        // skip the ptr increment here as well, for some reason it just
-                        // doesn't seem to like arrays...  :/
-                        continue;
                     }
                 }
                 Ok(None) => {
-                    {};
+                    // Let the recursed-into parser handle incrementing the current pointer
                 }
                 Err(error) => {
                     *state = ResponseParserState::Errored;
@@ -252,8 +259,6 @@ fn parse_response(
             },
             ResponseParserState::Errored => return Err(ParseError::ParserIsInAnErrorState),
         }
-
-        *ptr += 1;
     }
 
     Ok(None)
@@ -577,5 +582,110 @@ mod tests {
 
         // this is where the weird bug happens
         assert_eq!(Some(RedisResult::Null), parser.get_response().unwrap());
+    }
+
+    #[test]
+    fn can_handle_very_long_arrays() {
+        let mut parser = ResponseParser::new();
+        parser.feed(
+            "+OK\r\n\
+             *28\r\n\
+             $2\r\n\
+             49\r\n\
+             $3\r\n\
+             -58\r\n\
+             $2\r\n\
+             59\r\n\
+             $1\r\n\
+             7\r\n\
+             $2\r\n\
+             23\r\n\
+             $2\r\n\
+             43\r\n\
+             $2\r\n\
+             77\r\n\
+             $3\r\n\
+             -36\r\n\
+             $2\r\n\
+             66\r\n\
+             $3\r\n\
+             -57\r\n\
+             $3\r\n\
+             -55\r\n\
+             $2\r\n\
+             95\r\n\
+             $2\r\n\
+             51\r\n\
+             $3\r\n\
+             -74\r\n\
+             $3\r\n\
+             -47\r\n\
+             $3\r\n\
+             -90\r\n\
+             $3\r\n\
+             -65\r\n\
+             $2\r\n\
+             41\r\n\
+             $2\r\n\
+             77\r\n\
+             $2\r\n\
+             47\r\n\
+             $2\r\n\
+             87\r\n\
+             $2\r\n\
+             24\r\n\
+             $2\r\n\
+             25\r\n\
+             $2\r\n\
+             -2\r\n\
+             $3\r\n\
+             -27\r\n\
+             $2\r\n\
+             63\r\n\
+             $3\r\n\
+             -20\r\n\
+             $2\r\n\
+             90\r\n"
+                .as_bytes(),
+        );
+
+        assert_eq!(
+            Some(RedisResult::String("OK".into())),
+            parser.get_response().unwrap()
+        );
+
+        assert_eq!(
+            Some(RedisResult::Array(vec![
+                RedisResult::String("49".into()),
+                RedisResult::String("-58".into()),
+                RedisResult::String("59".into()),
+                RedisResult::String("7".into()),
+                RedisResult::String("23".into()),
+                RedisResult::String("43".into()),
+                RedisResult::String("77".into()),
+                RedisResult::String("-36".into()),
+                RedisResult::String("66".into()),
+                RedisResult::String("-57".into()),
+                RedisResult::String("-55".into()),
+                RedisResult::String("95".into()),
+                RedisResult::String("51".into()),
+                RedisResult::String("-74".into()),
+                RedisResult::String("-47".into()),
+                RedisResult::String("-90".into()),
+                RedisResult::String("-65".into()),
+                RedisResult::String("41".into()),
+                RedisResult::String("77".into()),
+                RedisResult::String("47".into()),
+                RedisResult::String("87".into()),
+                RedisResult::String("24".into()),
+                RedisResult::String("25".into()),
+                RedisResult::String("-2".into()),
+                RedisResult::String("-27".into()),
+                RedisResult::String("63".into()),
+                RedisResult::String("-20".into()),
+                RedisResult::String("90".into()),
+            ])),
+            parser.get_response().unwrap()
+        )
     }
 }

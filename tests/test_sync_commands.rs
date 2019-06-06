@@ -6,6 +6,7 @@ use reredis::commands::*;
 use crate::utils::load_redis_instance;
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
+use std::collections::HashSet;
 use std::thread;
 use std::time::Duration;
 
@@ -135,4 +136,52 @@ fn mset_can_fail_if_a_key_already_exists() {
     assert_eq!(false, succeeded);
 
     assert_eq!(Some(100), client.issue(get("this::that".into())).unwrap());
+}
+
+#[test]
+fn mget_returns_a_list_of_keys_with_the_same_type() {
+    let server = load_redis_instance();
+
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("this", 100)).unwrap();
+    client.issue(set("that", 100)).unwrap();
+    client.issue(set("other", 100)).unwrap();
+
+    assert_eq!(
+        vec![Some(100), Some(100), Some(100)],
+        client
+            .issue(mget().with_keys(vec!["this", "that", "other"]))
+            .unwrap()
+    )
+}
+
+#[quickcheck]
+fn qc_mget_and_mset_can_work_together(pairs: Vec<(String, i64)>) -> TestResult {
+    if pairs.len() == 0 {
+        return TestResult::discard();
+    }
+    let duplicate_check = pairs.iter().map(|(key, _)| key).collect::<HashSet<_>>();
+    if duplicate_check.len() != pairs.len() {
+        // Weird things happen if we have duplicate keys (quite naturally, but that's not
+        // something we want to test here).
+        return TestResult::discard();
+    }
+
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    let insertable: Vec<(String, i64)> = pairs.clone();
+    let keys: Vec<String> = pairs.clone().into_iter().map(|(key, _)| key).collect();
+    let values: Vec<Option<i64>> = pairs
+        .clone()
+        .into_iter()
+        .map(|(_, value)| Some(value))
+        .collect();
+
+    client.issue(mset().with_pairs(insertable)).unwrap();
+
+    assert_eq!(values, client.issue(mget().with_keys(keys)).unwrap());
+
+    TestResult::passed()
 }

@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
-use crate::utils::{ validate_key};
+use crate::utils::validate_key;
 
 pub struct Increment {
     key: String,

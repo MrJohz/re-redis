@@ -6,7 +6,7 @@ pub(crate) fn number_length(mut number: u128) -> usize {
     let mut base = 0;
 
     while number > 0 {
-        number = number / 10;
+        number /= 10;
         base += 1;
     }
 

@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 
 use crate::types::redis_values::{ConversionError, RedisResult};
@@ -24,10 +24,6 @@ impl<T> Get<T> {
             default,
         }
     }
-}
-
-pub fn get<T>(key: String) -> Get<T> {
-    Get::new(validate_key(key))
 }
 
 impl<T> StructuredCommand for Get<T>
@@ -70,6 +66,65 @@ where
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
         let intermediate: Result<Option<Self::Output>, ConversionError> = result.try_into();
         intermediate.map(|option| option.unwrap_or(self.default))
+    }
+}
+
+pub fn get<T>(key: String) -> Get<T> {
+    Get::new(validate_key(key))
+}
+
+pub struct GetMultipleList<T> {
+    keys: Vec<String>,
+    _t: PhantomData<T>,
+}
+
+impl<T> GetMultipleList<T> {
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.keys.push(key.into());
+        self
+    }
+
+    pub fn with_keys(mut self, keys: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.keys = keys.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+impl<T> StructuredCommand for GetMultipleList<T>
+where
+    RedisResult: TryInto<Option<T>, Error = ConversionError>,
+{
+    type Output = Vec<Option<T>>;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut message = format!(
+            "*{msg_size}\r\n\
+             $4\r\nMGET\r\n",
+            msg_size = self.keys.len() + 1,
+        );
+
+        for key in &self.keys {
+            message.push_str(&format!("${len}\r\n{key}\r\n", len = key.len(), key = key))
+        }
+
+        message.into()
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        match result {
+            RedisResult::Array(results) => results.into_iter().map(|r| r.try_into()).collect(),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: Option::try_from(result)?,
+            }),
+        }
+    }
+}
+
+pub fn mget<T>() -> GetMultipleList<T> {
+    GetMultipleList {
+        keys: Vec::new(),
+        _t: PhantomData,
     }
 }
 
