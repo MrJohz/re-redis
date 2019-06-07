@@ -1,15 +1,8 @@
 use crate::redis_values::ConversionError;
-use crate::sans_io::response_parser::{ParseError, ResponseParser};
-use crate::{RedisError, RedisValue, StructuredCommand};
+use crate::sans_io::response_parser::{ ResponseParser};
+use crate::{RedisError, StructuredCommand};
 use std::io::Result as IoResult;
 use std::sync::mpsc::{channel, Receiver, Sender};
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum RedisSansEvent {
-    BytesSent(Vec<u8>),
-    ServerResponseReceived(RedisValue),
-    ProtocolError(ParseError),
-}
 
 #[derive(Debug)]
 pub struct Client {

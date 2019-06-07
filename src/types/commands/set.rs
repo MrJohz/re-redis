@@ -84,7 +84,7 @@ impl StructuredCommand for Set {
                 key_length = self.key.len(),
                 value = self.value,
                 value_length = self.value.len(),
-                expiry_length = number_length(duration.as_millis()),
+                expiry_length = number_length(duration.as_millis() as i128),
                 expiry = duration.as_millis(),
             ),
             None => format!(
@@ -124,7 +124,7 @@ impl StructuredCommand for SetIfExists {
                 key_length = self.key.len(),
                 value = self.value,
                 value_length = self.value.len(),
-                expiry_length = number_length(duration.as_millis()),
+                expiry_length = number_length(duration.as_millis() as i128),
                 expiry = duration.as_millis(),
                 exists_tag = exists_tag,
             ),

@@ -3,12 +3,12 @@ mod utils;
 
 use reredis::commands::*;
 
-use crate::utils::load_redis_instance;
 use quickcheck::TestResult;
 use quickcheck_macros::quickcheck;
 use std::collections::HashSet;
 use std::thread;
 use std::time::Duration;
+use utils::load_redis_instance;
 
 #[test]
 fn successfully_sets_and_gets_a_key_from_redis() {
@@ -202,8 +202,6 @@ fn getset_returns_a_value_if_the_key_has_previously_been_set() {
 
     client.issue(set("test-key", "this is a value")).unwrap();
 
-    let value = client
-        .issue(getset("test-key", 120))
-        .unwrap();
+    let value = client.issue(getset("test-key", 120)).unwrap();
     assert_eq!(value, Some("this is a value".to_string()));
 }

@@ -1,4 +1,7 @@
-pub(crate) fn number_length(mut number: u128) -> usize {
+pub(crate) fn number_length(mut number: i128) -> usize {
+    if number < 0 {
+        return 1 + number_length(-number);
+    }
     if number == 0 {
         return 1;
     }
@@ -48,7 +51,7 @@ mod number_length_tests {
     }
 
     #[quickcheck]
-    fn has_the_correct_length(number: u128) {
+    fn has_the_correct_length(number: i128) {
         assert_eq!(number.to_string().len(), number_length(number));
     }
 }
