@@ -1,5 +1,5 @@
-use crate::redis_values::ConversionError;
-use crate::sans_io::response_parser::{ ResponseParser};
+use crate::sans_io::response_parser::ResponseParser;
+use crate::types::redis_values::ConversionError;
 use crate::{RedisError, StructuredCommand};
 use std::io::Result as IoResult;
 use std::sync::mpsc::{channel, Receiver, Sender};

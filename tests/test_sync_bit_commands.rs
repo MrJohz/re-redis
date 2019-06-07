@@ -61,3 +61,44 @@ fn bitcount_can_get_the_count_of_the_last_bits_in_a_string() {
     client.issue(set("mykey", "foobar")).unwrap();
     assert_eq!(7, client.issue(bitcount("mykey").in_range(-2..-1)).unwrap());
 }
+
+#[test]
+fn bitcount_can_use_exclusive_upper_ranges_if_desired() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("mykey", "foobar")).unwrap();
+    assert_eq!(10, client.issue(bitcount("mykey").in_range(0..=2)).unwrap());
+}
+
+#[test]
+fn bitpos_returns_none_if_no_bits_in_a_string_are_set() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("mykey", "\x00")).unwrap();
+    assert_eq!(None, client.issue(bitpos("mykey", true)).unwrap());
+}
+
+#[test]
+fn bitpos_returns_the_first_set_bit_in_a_string() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("mykey", "\x10")).unwrap();
+    assert_eq!(Some(3), client.issue(bitpos("mykey", true)).unwrap());
+}
+
+// TODO: to properly test this stuff, we need to be able to insert raw bytes into the
+//   DB, which means we need to stop fannying about with strings and start dealing in nothing
+//   but u8 slices.  RAW u8 SLICES!
+
+#[test]
+fn bitpos_returns_the_first_unset_bit_in_a_string() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    client.issue(set("mykey", "\x00")).unwrap();
+    client.issue(setbit("mykey", 0, true)).unwrap();
+    assert_eq!(Some(1), client.issue(bitpos("mykey", false)).unwrap());
+}
