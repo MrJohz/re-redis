@@ -1,33 +1,26 @@
 use crate::types::redis_values::ConversionError;
 use crate::types::{RedisResult, StructuredCommand};
-use crate::utils::{number_length, validate_key};
+use crate::RBytes;
 use std::convert::TryInto;
 use std::ops::{Range, RangeFrom, RangeInclusive};
 
 #[derive(Debug)]
-pub struct SetBit {
-    key: String,
+pub struct SetBit<'a> {
+    key: RBytes<'a>,
     offset: u32,
     value: bool,
 }
 
-impl StructuredCommand for SetBit {
+impl<'a> StructuredCommand for SetBit<'a> {
     type Output = bool;
 
     fn get_bytes(&self) -> Vec<u8> {
-        format!(
-            "*4\r\n\
-             $6\r\nSETBIT\r\n\
-             ${key_length}\r\n{key}\r\n\
-             ${offset_length}\r\n{offset}\r\n\
-             $1\r\n{value}\r\n",
-            key_length = self.key.len(),
-            key = self.key,
-            offset_length = number_length(self.offset as i128),
-            offset = self.offset,
-            value = if self.value { "1" } else { "0" }
+        resp_bytes!(
+            "SETBIT",
+            self.key,
+            self.offset.to_string(),
+            if self.value { "1" } else { "0" }
         )
-        .into()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -42,35 +35,25 @@ impl StructuredCommand for SetBit {
     }
 }
 
-pub fn setbit(key: impl Into<String>, offset: u32, value: bool) -> SetBit {
+pub fn setbit<'a>(key: impl Into<RBytes<'a>>, offset: u32, value: bool) -> SetBit<'a> {
     SetBit {
-        key: validate_key(key),
+        key: key.into(),
         offset,
         value,
     }
 }
 
 #[derive(Debug)]
-pub struct GetBit {
-    key: String,
+pub struct GetBit<'a> {
+    key: RBytes<'a>,
     offset: u32,
 }
 
-impl StructuredCommand for GetBit {
+impl<'a> StructuredCommand for GetBit<'a> {
     type Output = bool;
 
     fn get_bytes(&self) -> Vec<u8> {
-        format!(
-            "*3\r\n\
-             $6\r\nGETBIT\r\n\
-             ${key_length}\r\n{key}\r\n\
-             ${offset_length}\r\n{offset}\r\n",
-            key_length = self.key.len(),
-            key = self.key,
-            offset_length = number_length(self.offset as i128),
-            offset = self.offset,
-        )
-        .into()
+        resp_bytes!("GETBIT", self.key, self.offset.to_string())
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -85,9 +68,9 @@ impl StructuredCommand for GetBit {
     }
 }
 
-pub fn getbit(key: impl Into<String>, offset: u32) -> GetBit {
+pub fn getbit<'a>(key: impl Into<RBytes<'a>>, offset: u32) -> GetBit<'a> {
     GetBit {
-        key: validate_key(key),
+        key: key.into(),
         offset,
     }
 }
@@ -130,43 +113,27 @@ impl RangeWithLowerBound for RangeFrom<i64> {
 }
 
 #[derive(Debug)]
-pub struct BitCount {
-    key: String,
+pub struct BitCount<'a> {
+    key: RBytes<'a>,
     indices: Option<(i64, i64)>,
 }
 
-impl BitCount {
+impl<'a> BitCount<'a> {
     pub fn in_range(mut self, range: impl RangeWithBounds) -> Self {
         self.indices.replace(range.into_bounds());
         self
     }
 }
 
-impl StructuredCommand for BitCount {
+impl<'a> StructuredCommand for BitCount<'a> {
     type Output = u32;
 
     fn get_bytes(&self) -> Vec<u8> {
         match self.indices {
-            Some((start, end)) => format!(
-                "*4\r\n\
-                 $8\r\nBITCOUNT\r\n\
-                 ${key_length}\r\n{key}\r\n\
-                 ${start_length}\r\n{start}\r\n\
-                 ${end_length}\r\n{end}\r\n",
-                key_length = self.key.len(),
-                key = self.key,
-                start_length = number_length(start as i128),
-                start = start,
-                end_length = number_length(end as i128),
-                end = end
-            ),
-            None => format!(
-                "*2\r\n\
-                 $8\r\nBITCOUNT\r\n\
-                 ${key_length}\r\n{key}\r\n",
-                key_length = self.key.len(),
-                key = self.key
-            ),
+            Some((start, end)) => {
+                resp_bytes!("BITCOUNT", self.key, start.to_string(), end.to_string())
+            }
+            None => resp_bytes!("BITCOUNT", self.key),
         }
         .into()
     }
@@ -182,70 +149,47 @@ impl StructuredCommand for BitCount {
     }
 }
 
-pub fn bitcount(key: impl Into<String>) -> BitCount {
+pub fn bitcount<'a>(key: impl Into<RBytes<'a>>) -> BitCount<'a> {
     BitCount {
-        key: validate_key(key),
+        key: key.into(),
         indices: None,
     }
 }
 
-pub struct BitPos {
-    key: String,
+pub struct BitPos<'a> {
+    key: RBytes<'a>,
     bit: bool,
     // if a bound is given, there *must* be a lower bound, and there *may* be an upper bound
     range: Option<(i64, Option<i64>)>,
 }
 
-impl BitPos {
+impl<'a> BitPos<'a> {
     pub fn in_range(mut self, range: impl RangeWithLowerBound) -> Self {
         self.range.replace(range.into_bounds());
         self
     }
 }
 
-impl StructuredCommand for BitPos {
+impl<'a> StructuredCommand for BitPos<'a> {
     type Output = Option<u32>;
 
     fn get_bytes(&self) -> Vec<u8> {
         match self.range {
-            Some((start, Some(end))) => format!(
-                "*5\r\n\
-                 $6\r\nBITPOS\r\n\
-                 ${key_len}\r\n{key}\r\n\
-                 $1\r\n{bit}\r\n\
-                 ${start_length}\r\n{start}\r\n\
-                 ${end_length}\r\n{end}\r\n",
-                key_len = self.key.len(),
-                key = self.key,
-                bit = if self.bit { "1" } else { "0" },
-                start_length = number_length(start as i128),
-                start = start,
-                end_length = number_length(end as i128),
-                end = end,
+            Some((start, Some(end))) => resp_bytes!(
+                "BITPOS",
+                self.key,
+                if self.bit { "1" } else { "0" },
+                start.to_string(),
+                end.to_string()
             ),
-            Some((start, None)) => format!(
-                "*4\r\n\
-                 $6\r\nBITPOS\r\n\
-                 ${key_len}\r\n{key}\r\n\
-                 $1\r\n{bit}\r\n\
-                 ${start_length}\r\n{start}\r\n",
-                key_len = self.key.len(),
-                key = self.key,
-                bit = if self.bit { "1" } else { "0" },
-                start_length = number_length(start as i128),
-                start = start,
+            Some((start, None)) => resp_bytes!(
+                "BITPOS",
+                self.key,
+                if self.bit { "1" } else { "0" },
+                start.to_string()
             ),
-            None => format!(
-                "*3\r\n\
-                 $6\r\nBITPOS\r\n\
-                 ${key_len}\r\n{key}\r\n\
-                 $1\r\n{bit}\r\n",
-                key_len = self.key.len(),
-                key = self.key,
-                bit = if self.bit { "1" } else { "0" },
-            ),
+            None => resp_bytes!("BITPOS", self.key, if self.bit { "1" } else { "0" }),
         }
-        .into()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -260,7 +204,7 @@ impl StructuredCommand for BitPos {
     }
 }
 
-pub fn bitpos(key: impl Into<String>, bit: bool) -> BitPos {
+pub fn bitpos<'a>(key: impl Into<RBytes<'a>>, bit: bool) -> BitPos<'a> {
     BitPos {
         key: key.into(),
         bit,

@@ -6,6 +6,7 @@ use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
 use crate::RBytes;
 
+// TODO: derive Debug for all commands
 pub struct Set<'a> {
     key: RBytes<'a>,
     value: RBytes<'a>,

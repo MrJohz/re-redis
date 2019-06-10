@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct RBytes<'a>(Cow<'a, [u8]>);
 
 impl<'a> RBytes<'a> {
