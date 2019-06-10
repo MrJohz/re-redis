@@ -89,16 +89,11 @@ fn bitpos_returns_the_first_set_bit_in_a_string() {
     assert_eq!(Some(3), client.issue(bitpos("mykey", true)).unwrap());
 }
 
-// TODO: to properly test this stuff, we need to be able to insert raw bytes into the
-//   DB, which means we need to stop fannying about with strings and start dealing in nothing
-//   but u8 slices.  RAW u8 SLICES!
-
 #[test]
 fn bitpos_returns_the_first_unset_bit_in_a_string() {
     let server = load_redis_instance();
     let mut client = reredis::SyncClient::new(server.address()).unwrap();
 
-    client.issue(set("mykey", "\x00")).unwrap();
-    client.issue(setbit("mykey", 0, true)).unwrap();
-    assert_eq!(Some(1), client.issue(bitpos("mykey", false)).unwrap());
+    client.issue(set("mykey", b"\xFF\xF0".as_ref())).unwrap();
+    assert_eq!(Some(12), client.issue(bitpos("mykey", false)).unwrap());
 }

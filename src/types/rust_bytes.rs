@@ -50,3 +50,15 @@ into_bytes_for_integers!(u8);
 
 into_bytes_for_integers!(f64);
 into_bytes_for_integers!(f32);
+
+impl<'a> From<&'a [u8]> for RBytes<'a> {
+    fn from(other: &'a [u8]) -> Self {
+        RBytes(Cow::from(other))
+    }
+}
+
+impl<'a> From<Vec<u8>> for RBytes<'a> {
+    fn from(other: Vec<u8>) -> Self {
+        RBytes(Cow::from(other))
+    }
+}
