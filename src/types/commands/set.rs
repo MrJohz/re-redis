@@ -79,12 +79,12 @@ impl<'a> StructuredCommand for Set<'a> {
         match self.expiry {
             Some(duration) => resp_bytes!(
                 "SET",
-                self.key,
-                self.value,
+                &self.key,
+                &self.value,
                 "PX",
                 duration.as_millis().to_string()
             ),
-            None => resp_bytes!("SET", self.key, self.value),
+            None => resp_bytes!("SET", &self.key, &self.value),
         }
     }
 
@@ -101,15 +101,14 @@ impl<'a> StructuredCommand for SetIfExists<'a> {
         match self.expiry {
             Some(duration) => resp_bytes!(
                 "SET",
-                self.key,
-                self.value,
+                &self.key,
+                &self.value,
                 "PX",
                 duration.as_millis().to_string(),
                 exists_tag
             ),
-            None => resp_bytes!("SET", self.key, self.value, exists_tag),
+            None => resp_bytes!("SET", &self.key, &self.value, exists_tag),
         }
-        .into()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -157,7 +156,7 @@ impl<'a> StructuredCommand for SetMany<'a> {
 
         let mut bytes = Vec::new();
 
-        bytes.push('*' as u8);
+        bytes.push(b'*');
         bytes.extend_from_slice(message_size.as_bytes());
         bytes.extend_from_slice("\r\n$4\r\nMSET\r\n".as_bytes());
 
@@ -186,7 +185,7 @@ impl<'a> StructuredCommand for SetManyIfExists<'a> {
 
         let mut bytes = Vec::new();
 
-        bytes.push('*' as u8);
+        bytes.push(b'*');
         bytes.extend_from_slice(message_size.as_bytes());
         bytes.extend_from_slice("\r\n$6\r\nMSETNX\r\n".as_bytes());
 
@@ -229,7 +228,7 @@ where
     type Output = Option<T>;
 
     fn get_bytes(&self) -> Vec<u8> {
-        resp_bytes!("GETSET", self.key, self.value)
+        resp_bytes!("GETSET", &self.key, &self.value)
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {

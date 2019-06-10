@@ -15,9 +15,9 @@ macro_rules! resp_bytes {
             let count_bytes = count.as_bytes();
             let mut v = Vec::with_capacity(3 + count_bytes.len());
 
-            v.push('*' as u8);
+            v.push(b'*');
             v.extend_from_slice(count_bytes);
-            v.extend_from_slice("\r\n".as_bytes());
+            v.extend_from_slice(b"\r\n");
 
             $(insert_bytes_into_vec!(v, $item);)*;
 
@@ -29,15 +29,19 @@ macro_rules! resp_bytes {
 macro_rules! insert_bytes_into_vec {
     ($arg:ident, $str:expr) => {
         {
-            let length = $str.len();
+            let input_raw = $str;
+            let input = input_raw.as_bytes();
+
+            let length = input.len();
             let length_str_raw = length.to_string();
             let length_str = length_str_raw.as_bytes();
+
             $arg.reserve(1 + length_str.len() + 2 + length + 2);
-            $arg.push('$' as u8);
+            $arg.push(b'$');
             $arg.extend_from_slice(length_str);
-            $arg.extend_from_slice("\r\n".as_bytes());
-            $arg.extend_from_slice($str.as_bytes());
-            $arg.extend_from_slice("\r\n".as_bytes());
+            $arg.extend_from_slice(b"\r\n");
+            $arg.extend_from_slice(input);
+            $arg.extend_from_slice(b"\r\n");
         }
     };
 }

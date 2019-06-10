@@ -17,7 +17,7 @@ impl<'a> StructuredCommand for SetBit<'a> {
     fn get_bytes(&self) -> Vec<u8> {
         resp_bytes!(
             "SETBIT",
-            self.key,
+            &self.key,
             self.offset.to_string(),
             if self.value { "1" } else { "0" }
         )
@@ -53,7 +53,7 @@ impl<'a> StructuredCommand for GetBit<'a> {
     type Output = bool;
 
     fn get_bytes(&self) -> Vec<u8> {
-        resp_bytes!("GETBIT", self.key, self.offset.to_string())
+        resp_bytes!("GETBIT", &self.key, self.offset.to_string())
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -131,11 +131,10 @@ impl<'a> StructuredCommand for BitCount<'a> {
     fn get_bytes(&self) -> Vec<u8> {
         match self.indices {
             Some((start, end)) => {
-                resp_bytes!("BITCOUNT", self.key, start.to_string(), end.to_string())
+                resp_bytes!("BITCOUNT", &self.key, start.to_string(), end.to_string())
             }
-            None => resp_bytes!("BITCOUNT", self.key),
+            None => resp_bytes!("BITCOUNT", &self.key),
         }
-        .into()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -177,18 +176,18 @@ impl<'a> StructuredCommand for BitPos<'a> {
         match self.range {
             Some((start, Some(end))) => resp_bytes!(
                 "BITPOS",
-                self.key,
+                &self.key,
                 if self.bit { "1" } else { "0" },
                 start.to_string(),
                 end.to_string()
             ),
             Some((start, None)) => resp_bytes!(
                 "BITPOS",
-                self.key,
+                &self.key,
                 if self.bit { "1" } else { "0" },
                 start.to_string()
             ),
-            None => resp_bytes!("BITPOS", self.key, if self.bit { "1" } else { "0" }),
+            None => resp_bytes!("BITPOS", &self.key, if self.bit { "1" } else { "0" }),
         }
     }
 

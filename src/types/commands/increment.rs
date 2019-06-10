@@ -4,6 +4,7 @@ use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
 use crate::utils::validate_key;
 
+// TODO: Convert to RBytes
 pub struct Increment {
     key: String,
     by: i64,

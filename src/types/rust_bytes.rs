@@ -5,10 +5,6 @@ use std::ops::Deref;
 pub struct RBytes<'a>(Cow<'a, [u8]>);
 
 impl<'a> RBytes<'a> {
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
     pub(crate) fn as_bytes(&'a self) -> &'a [u8] {
         self.0.deref()
     }
