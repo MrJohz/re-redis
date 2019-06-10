@@ -1,3 +1,6 @@
+#[macro_use]
+mod resp_macros;
+
 mod command;
 pub mod commands;
 mod errors;

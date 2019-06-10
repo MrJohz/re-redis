@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::types::command::RedisArg;
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
-use crate::utils::{number_length, validate_key};
+use crate::utils::validate_key;
 use std::marker::PhantomData;
 
 pub struct Set {
@@ -73,32 +73,15 @@ impl StructuredCommand for Set {
 
     fn get_bytes(&self) -> Vec<u8> {
         match self.expiry {
-            Some(duration) => format!(
-                "*5\r\n\
-                 $3\r\nSET\r\n\
-                 ${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n\
-                 $2\r\nPX\r\n\
-                 ${expiry_length}\r\n{expiry}\r\n",
-                key = self.key,
-                key_length = self.key.len(),
-                value = self.value,
-                value_length = self.value.len(),
-                expiry_length = number_length(duration.as_millis() as i128),
-                expiry = duration.as_millis(),
+            Some(duration) => resp_bytes!(
+                "SET",
+                self.key,
+                self.value,
+                "PX",
+                duration.as_millis().to_string()
             ),
-            None => format!(
-                "*3\r\n\
-                 $3\r\nSET\r\n\
-                 ${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n",
-                key = self.key,
-                key_length = self.key.len(),
-                value = self.value,
-                value_length = self.value.len(),
-            ),
+            None => resp_bytes!("SET", self.key, self.value),
         }
-        .into()
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -112,34 +95,15 @@ impl StructuredCommand for SetIfExists {
     fn get_bytes(&self) -> Vec<u8> {
         let exists_tag = if self.exists { "XX" } else { "NX" };
         match self.expiry {
-            Some(duration) => format!(
-                "*6\r\n\
-                 $3\r\nSET\r\n\
-                 ${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n\
-                 $2\r\nPX\r\n\
-                 ${expiry_length}\r\n{expiry}\r\n\
-                 $2\r\n{exists_tag}\r\n",
-                key = self.key,
-                key_length = self.key.len(),
-                value = self.value,
-                value_length = self.value.len(),
-                expiry_length = number_length(duration.as_millis() as i128),
-                expiry = duration.as_millis(),
-                exists_tag = exists_tag,
+            Some(duration) => resp_bytes!(
+                "SET",
+                self.key,
+                self.value,
+                "PX",
+                duration.as_millis().to_string(),
+                exists_tag
             ),
-            None => format!(
-                "*4\r\n\
-                 $3\r\nSET\r\n\
-                 ${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n\
-                 $2\r\n{exists_tag}\r\n",
-                key = self.key,
-                key_length = self.key.len(),
-                value = self.value,
-                value_length = self.value.len(),
-                exists_tag = exists_tag,
-            ),
+            None => resp_bytes!("SET", self.key, self.value, exists_tag),
         }
         .into()
     }
@@ -269,17 +233,7 @@ where
     type Output = Option<T>;
 
     fn get_bytes(&self) -> Vec<u8> {
-        format!(
-            "*3\r\n\
-             $6\r\nGETSET\r\n\
-             ${key_length}\r\n{key}\r\n\
-             ${value_length}\r\n{value}\r\n",
-            key_length = self.key.len(),
-            key = self.key,
-            value_length = self.value.len(),
-            value = self.value,
-        )
-        .into()
+        resp_bytes!("GETSET", self.key, self.value)
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
