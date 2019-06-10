@@ -19,14 +19,14 @@ macro_rules! resp_bytes {
             v.extend_from_slice(count_bytes);
             v.extend_from_slice("\r\n".as_bytes());
 
-            $(_resp_bytes_each_impl!(v, $item);)*;
+            $(insert_bytes_into_vec!(v, $item);)*;
 
             v
         }
     };
 }
 
-macro_rules! _resp_bytes_each_impl {
+macro_rules! insert_bytes_into_vec {
     ($arg:ident, $str:expr) => {
         {
             let length = $str.len();

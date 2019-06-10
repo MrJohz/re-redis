@@ -1,33 +1,36 @@
 use std::convert::{TryFrom, TryInto};
+use std::marker::PhantomData;
 use std::time::Duration;
 
-use crate::types::command::RedisArg;
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
-use crate::utils::validate_key;
-use std::marker::PhantomData;
+use crate::RBytes;
 
-pub struct Set {
-    key: String,
+pub struct Set<'a> {
+    key: RBytes<'a>,
+    value: RBytes<'a>,
     expiry: Option<Duration>,
-    value: String,
 }
 
-impl Set {
-    pub(self) fn new(key: String, value: impl Into<RedisArg>) -> Self {
+impl<'a> Set<'a> {
+    pub(self) fn new(key: RBytes<'a>, value: RBytes<'a>) -> Self {
         Self {
             key,
+            value,
             expiry: None,
-            value: value.into().0,
         }
     }
 
     pub fn with_expiry(mut self, duration: Duration) -> Self {
+        if cfg!(debug_assertions) && duration == Duration::from_millis(0) {
+            panic!("duration cannot be 0 in length");
+        }
+
         self.expiry.replace(duration);
         self
     }
 
-    pub fn if_exists(self) -> SetIfExists {
+    pub fn if_exists(self) -> SetIfExists<'a> {
         SetIfExists {
             key: self.key,
             expiry: self.expiry,
@@ -36,7 +39,7 @@ impl Set {
         }
     }
 
-    pub fn if_not_exists(self) -> SetIfExists {
+    pub fn if_not_exists(self) -> SetIfExists<'a> {
         SetIfExists {
             key: self.key,
             expiry: self.expiry,
@@ -46,14 +49,14 @@ impl Set {
     }
 }
 
-pub struct SetIfExists {
-    key: String,
+pub struct SetIfExists<'a> {
+    key: RBytes<'a>,
+    value: RBytes<'a>,
     expiry: Option<Duration>,
-    value: String,
     exists: bool,
 }
 
-impl SetIfExists {
+impl<'a> SetIfExists<'a> {
     pub fn with_expiry(mut self, duration: Duration) -> Self {
         if cfg!(debug_assertions) && duration == Duration::from_millis(0) {
             panic!("duration cannot be 0 in length");
@@ -64,11 +67,11 @@ impl SetIfExists {
     }
 }
 
-pub fn set(key: impl Into<String>, value: impl Into<RedisArg>) -> Set {
-    Set::new(validate_key(key), value)
+pub fn set<'a>(key: impl Into<RBytes<'a>>, value: impl Into<RBytes<'a>>) -> Set<'a> {
+    Set::new(key.into(), value.into())
 }
 
-impl StructuredCommand for Set {
+impl<'a> StructuredCommand for Set<'a> {
     type Output = ();
 
     fn get_bytes(&self) -> Vec<u8> {
@@ -89,7 +92,7 @@ impl StructuredCommand for Set {
     }
 }
 
-impl StructuredCommand for SetIfExists {
+impl<'a> StructuredCommand for SetIfExists<'a> {
     type Output = bool;
 
     fn get_bytes(&self) -> Vec<u8> {
@@ -117,56 +120,52 @@ impl StructuredCommand for SetIfExists {
     }
 }
 
-pub struct SetMany {
-    key_value_pairs: Vec<(String, String)>,
+pub struct SetMany<'a> {
+    key_value_pairs: Vec<(RBytes<'a>, RBytes<'a>)>,
 }
 
-impl SetMany {
-    pub fn add(mut self, key: impl Into<String>, value: impl Into<RedisArg>) -> Self {
-        self.key_value_pairs.push((key.into(), value.into().0));
+impl<'a> SetMany<'a> {
+    pub fn add(mut self, key: impl Into<RBytes<'a>>, value: impl Into<RBytes<'a>>) -> Self {
+        self.key_value_pairs.push((key.into(), value.into()));
         self
     }
 
     pub fn with_pairs(
         mut self,
-        pairs: impl IntoIterator<Item = (impl Into<String>, impl Into<RedisArg>)>,
+        pairs: impl IntoIterator<Item = (impl Into<RBytes<'a>>, impl Into<RBytes<'a>>)>,
     ) -> Self {
         self.key_value_pairs = pairs
             .into_iter()
-            .map(|(first, second)| (first.into(), second.into().0))
+            .map(|(first, second)| (first.into(), second.into()))
             .collect();
         self
     }
 
-    pub fn if_none_exists(self) -> SetManyIfExists {
+    pub fn if_none_exists(self) -> SetManyIfExists<'a> {
         SetManyIfExists {
             key_value_pairs: self.key_value_pairs,
         }
     }
 }
 
-impl StructuredCommand for SetMany {
+impl<'a> StructuredCommand for SetMany<'a> {
     type Output = ();
 
     fn get_bytes(&self) -> Vec<u8> {
-        let mut header = format!(
-            "*{msg_size}\r\n\
-             $4\r\nMSET\r\n",
-            msg_size = (self.key_value_pairs.len() * 2) + 1,
-        );
+        let message_size = ((self.key_value_pairs.len() * 2) + 1).to_string();
+
+        let mut bytes = Vec::new();
+
+        bytes.push('*' as u8);
+        bytes.extend_from_slice(message_size.as_bytes());
+        bytes.extend_from_slice("\r\n$4\r\nMSET\r\n".as_bytes());
 
         for (key, value) in &self.key_value_pairs {
-            header.push_str(&format!(
-                "${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n",
-                key = key,
-                key_length = key.len(),
-                value = value,
-                value_length = value.len(),
-            ));
+            insert_bytes_into_vec!(bytes, key);
+            insert_bytes_into_vec!(bytes, value);
         }
 
-        header.into()
+        bytes
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -174,32 +173,28 @@ impl StructuredCommand for SetMany {
     }
 }
 
-pub struct SetManyIfExists {
-    key_value_pairs: Vec<(String, String)>,
+pub struct SetManyIfExists<'a> {
+    key_value_pairs: Vec<(RBytes<'a>, RBytes<'a>)>,
 }
 
-impl StructuredCommand for SetManyIfExists {
+impl<'a> StructuredCommand for SetManyIfExists<'a> {
     type Output = bool;
 
     fn get_bytes(&self) -> Vec<u8> {
-        let mut header = format!(
-            "*{msg_size}\r\n\
-             $6\r\nMSETNX\r\n",
-            msg_size = (self.key_value_pairs.len() * 2) + 1,
-        );
+        let message_size = ((self.key_value_pairs.len() * 2) + 1).to_string();
+
+        let mut bytes = Vec::new();
+
+        bytes.push('*' as u8);
+        bytes.extend_from_slice(message_size.as_bytes());
+        bytes.extend_from_slice("\r\n$6\r\nMSETNX\r\n".as_bytes());
 
         for (key, value) in &self.key_value_pairs {
-            header.push_str(&format!(
-                "${key_length}\r\n{key}\r\n\
-                 ${value_length}\r\n{value}\r\n",
-                key = key,
-                key_length = key.len(),
-                value = value,
-                value_length = value.len(),
-            ));
+            insert_bytes_into_vec!(bytes, key);
+            insert_bytes_into_vec!(bytes, value);
         }
 
-        header.into()
+        bytes
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -214,19 +209,19 @@ impl StructuredCommand for SetManyIfExists {
     }
 }
 
-pub fn mset() -> SetMany {
+pub fn mset<'a>() -> SetMany<'a> {
     SetMany {
         key_value_pairs: Vec::new(),
     }
 }
 
-pub struct GetSet<T> {
-    key: String,
-    value: String,
+pub struct GetSet<'a, T> {
+    key: RBytes<'a>,
+    value: RBytes<'a>,
     _t: PhantomData<T>,
 }
 
-impl<T> StructuredCommand for GetSet<T>
+impl<'a, T> StructuredCommand for GetSet<'a, T>
 where
     RedisResult: TryInto<Option<T>, Error = ConversionError>,
 {
@@ -241,14 +236,14 @@ where
     }
 }
 
-pub fn getset<T, K, V>(key: K, value: V) -> GetSet<T>
+pub fn getset<'a, T, K, V>(key: K, value: V) -> GetSet<'a, T>
 where
-    K: Into<String>,
-    V: Into<RedisArg>,
+    K: Into<RBytes<'a>>,
+    V: Into<RBytes<'a>>,
 {
     GetSet {
         key: key.into(),
-        value: value.into().0,
+        value: value.into(),
         _t: PhantomData,
     }
 }
