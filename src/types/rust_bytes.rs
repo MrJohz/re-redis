@@ -1,7 +1,10 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 
-#[derive(Debug)]
+// TODO: provide a debug implementation that hides the implementation details
+//   and also converts to a string where possible
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct RBytes<'a>(Cow<'a, [u8]>);
 
 impl<'a> RBytes<'a> {
@@ -46,6 +49,8 @@ into_bytes_for_integers!(u8);
 
 into_bytes_for_integers!(f64);
 into_bytes_for_integers!(f32);
+
+into_bytes_for_integers!(bool); // not really integers - shh! don't tell anyone!
 
 impl<'a> From<&'a [u8]> for RBytes<'a> {
     fn from(other: &'a [u8]) -> Self {

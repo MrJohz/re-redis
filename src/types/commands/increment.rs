@@ -2,45 +2,44 @@ use std::convert::TryInto;
 
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
-use crate::utils::validate_key;
+use crate::RBytes;
 
-// TODO: Convert to RBytes
-pub struct Increment {
-    key: String,
+pub struct Increment<'a> {
+    key: RBytes<'a>,
     by: i64,
 }
 
-impl Increment {
-    pub(self) fn new(key: String, by: i64) -> Self {
+impl<'a> Increment<'a> {
+    pub(self) fn new(key: RBytes<'a>, by: i64) -> Self {
         Self { key, by }
     }
 }
 
-pub fn incr(key: impl Into<String>) -> Increment {
-    Increment::new(validate_key(key), 1)
+pub fn incr<'a>(key: impl Into<RBytes<'a>>) -> Increment<'a> {
+    Increment::new(key.into(), 1)
 }
-pub fn incr_by(key: impl Into<String>, by: i64) -> Increment {
-    Increment::new(validate_key(key), by)
+pub fn incr_by<'a>(key: impl Into<RBytes<'a>>, by: i64) -> Increment<'a> {
+    Increment::new(key.into(), by)
 }
-pub fn decr(key: impl Into<String>) -> Increment {
-    Increment::new(validate_key(key), -1)
+pub fn decr<'a>(key: impl Into<RBytes<'a>>) -> Increment<'a> {
+    Increment::new(key.into(), -1)
 }
-pub fn decr_by(key: impl Into<String>, by: i64) -> Increment {
-    Increment::new(validate_key(key), -by)
+pub fn decr_by<'a>(key: impl Into<RBytes<'a>>, by: i64) -> Increment<'a> {
+    Increment::new(key.into(), -by)
 }
 
-impl StructuredCommand for Increment {
+impl<'a> StructuredCommand for Increment<'a> {
     type Output = i64;
 
     fn get_bytes(&self) -> Vec<u8> {
         if self.by == 1 {
-            format!("INCR {}\r\n", self.key).into()
+            resp_bytes!("INCR", &self.key)
         } else if self.by == -1 {
-            format!("DECR {}\r\n", self.key).into()
+            resp_bytes!("DECR", &self.key)
         } else if self.by >= 0 {
-            format!("INCRBY {} {}\r\n", self.key, self.by).into()
+            resp_bytes!("INCRBY", &self.key, &self.by.to_string())
         } else {
-            format!("DECRBY {} {}\r\n", self.key, -self.by).into()
+            resp_bytes!("DECRBY", &self.key, &(-self.by).to_string())
         }
     }
 
@@ -59,7 +58,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "INCR my-first-key\r\n"
+            "*2\r\n$4\r\nINCR\r\n$12\r\nmy-first-key\r\n"
         );
     }
 
@@ -69,7 +68,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "INCRBY my-first-key 120\r\n"
+            "*3\r\n$6\r\nINCRBY\r\n$12\r\nmy-first-key\r\n$3\r\n120\r\n"
         );
     }
 
@@ -79,7 +78,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "DECRBY my-first-key 120\r\n"
+            "*3\r\n$6\r\nDECRBY\r\n$12\r\nmy-first-key\r\n$3\r\n120\r\n"
         );
     }
 
@@ -89,7 +88,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
-            "DECR my-first-key\r\n"
+            "*2\r\n$4\r\nDECR\r\n$12\r\nmy-first-key\r\n"
         );
     }
 }

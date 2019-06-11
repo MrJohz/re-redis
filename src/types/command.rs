@@ -1,5 +1,5 @@
 use crate::types::redis_values::{ConversionError, RedisResult};
-use crate::RedisValue;
+use crate::{RBytes, RedisValue};
 use std::convert::TryInto;
 
 pub trait StructuredCommand {
@@ -9,14 +9,14 @@ pub trait StructuredCommand {
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError>;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Command {
-    pub(self) name: String,
-    pub(self) args: Vec<String>,
+#[derive(Debug, Eq, PartialEq)]
+pub struct Command<'a> {
+    pub(self) name: RBytes<'a>,
+    pub(self) args: Vec<RBytes<'a>>,
 }
 
-impl Command {
-    pub fn cmd(name: impl Into<String>) -> Self {
+impl<'a> Command<'a> {
+    pub fn cmd(name: impl Into<RBytes<'a>>) -> Self {
         Command {
             name: name.into(),
             args: Vec::new(),
@@ -24,87 +24,43 @@ impl Command {
     }
 
     pub fn cmd_with_args(
-        name: impl Into<String>,
-        args: impl IntoIterator<Item = impl Into<RedisArg>>,
+        name: impl Into<RBytes<'a>>,
+        args: impl IntoIterator<Item = impl Into<RBytes<'a>>>,
     ) -> Self {
         Command {
             name: name.into(),
-            args: args.into_iter().map(Into::into).map(|arg| arg.0).collect(),
+            args: args.into_iter().map(Into::into).collect(),
         }
     }
 
-    pub fn with_arg(mut self, argument: impl Into<RedisArg>) -> Self {
-        self.args.push(argument.into().0);
+    pub fn with_arg(mut self, argument: impl Into<RBytes<'a>>) -> Self {
+        self.args.push(argument.into());
         self
     }
 }
 
-impl StructuredCommand for Command {
+impl<'a> StructuredCommand for Command<'a> {
     type Output = Option<RedisValue>;
 
     fn get_bytes(&self) -> Vec<u8> {
-        let mut result = String::new();
-        result.push_str(&self.name);
+        let mut result = Vec::new();
+        result.push(b'*');
+        result.extend_from_slice((self.args.len() + 1).to_string().as_bytes());
+        result.extend_from_slice(b"\r\n");
+
+        insert_bytes_into_vec!(result, &self.name);
+
         for arg in &(self.args) {
-            result.push_str(" ");
-            result.push_str(arg);
+            insert_bytes_into_vec!(result, arg);
         }
 
-        result.push_str("\r\n");
-        result.into()
+        result
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
         result.try_into()
     }
 }
-
-pub struct RedisArg(pub(in crate::types) String);
-
-macro_rules! create_convert_to_redis_arg_impl {
-    ($kind:ty, $name:ident => $conversion:block) => {
-        impl From<$kind> for RedisArg {
-            fn from($name: $kind) -> Self {
-                RedisArg($conversion)
-            }
-        }
-    };
-    ($kind:ty, $name:ident => $conversion:expr) => {
-        impl From<$kind> for RedisArg {
-            fn from($name: $kind) -> Self {
-                RedisArg($conversion)
-            }
-        }
-    };
-    ($kind:ty, default) => {
-        impl From<$kind> for RedisArg {
-            fn from(element: $kind) -> Self {
-                RedisArg(element.to_string())
-            }
-        }
-    };
-}
-
-create_convert_to_redis_arg_impl! {isize, default}
-create_convert_to_redis_arg_impl! {i64, default}
-create_convert_to_redis_arg_impl! {i32, default}
-create_convert_to_redis_arg_impl! {i16, default}
-create_convert_to_redis_arg_impl! {i8, default}
-
-create_convert_to_redis_arg_impl! {usize, default}
-create_convert_to_redis_arg_impl! {u64, default}
-create_convert_to_redis_arg_impl! {u32, default}
-create_convert_to_redis_arg_impl! {u16, default}
-create_convert_to_redis_arg_impl! {u8, default}
-
-create_convert_to_redis_arg_impl! {f64, default}
-create_convert_to_redis_arg_impl! {f32, default}
-
-create_convert_to_redis_arg_impl! {bool, default}
-create_convert_to_redis_arg_impl! {char, default}
-
-create_convert_to_redis_arg_impl! {&str, default}
-create_convert_to_redis_arg_impl! {String, input => input}
 
 #[cfg(test)]
 mod tests {
@@ -114,16 +70,16 @@ mod tests {
     fn can_create_a_new_command_with_just_a_name() {
         let cmd = Command::cmd("MY_CMD");
 
-        assert_eq!(cmd.name, "MY_CMD".to_string());
-        assert_eq!(cmd.args, Vec::<String>::new());
+        assert_eq!(cmd.name, RBytes::from("MY_CMD"));
+        assert_eq!(cmd.args, Vec::<RBytes>::new());
     }
 
     #[test]
     fn can_create_a_new_command_with_name_and_args() {
         let cmd = Command::cmd_with_args("MY_CMD", vec!["1", "2"]);
 
-        assert_eq!(cmd.name, "MY_CMD".to_string());
-        assert_eq!(cmd.args, vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(cmd.name, RBytes::from("MY_CMD"));
+        assert_eq!(cmd.args, vec![RBytes::from("1"), RBytes::from("2")]);
     }
 
     #[test]
@@ -135,15 +91,15 @@ mod tests {
             .with_arg(false)
             .with_arg(3.4);
 
-        assert_eq!(cmd.name, "MY_CMD".to_string());
+        assert_eq!(cmd.name, RBytes::from("MY_CMD"));
         assert_eq!(
             cmd.args,
             vec![
-                "1".to_string(),
-                "test".to_string(),
-                "String".to_string(),
-                "false".to_string(),
-                "3.4".to_string()
+                RBytes::from("1"),
+                RBytes::from("test"),
+                RBytes::from("String"),
+                RBytes::from("false"),
+                RBytes::from("3.4")
             ]
         )
     }
@@ -153,8 +109,8 @@ mod tests {
         let cmd = Command::cmd("MYCMD").with_arg(120).with_arg("test");
 
         assert_eq!(
-            "MYCMD 120 test\r\n",
-            String::from_utf8(cmd.get_bytes()).unwrap()
+            resp_bytes!("MYCMD", 120.to_string(), "test"),
+            cmd.get_bytes()
         );
     }
 }
