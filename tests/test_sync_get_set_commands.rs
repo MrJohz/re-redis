@@ -16,7 +16,7 @@ fn successfully_sets_and_gets_a_key_from_redis() {
 
     let mut client = reredis::SyncClient::new(server.address()).unwrap();
     client.issue(set("test-key", 32)).unwrap();
-    let value = client.issue(get::<i64>("test-key".into())).unwrap();
+    let value = client.issue(get("test-key")).unwrap();
     assert_eq!(value, Some(32));
 }
 
@@ -27,7 +27,7 @@ fn qc_can_insert_an_arbitrary_key_and_integer_value_into_redis(key: String, valu
     let mut client = reredis::SyncClient::new(server.address()).unwrap();
     client.issue(set(key.clone(), value)).unwrap();
 
-    let returned_value = client.issue(get::<i64>(key)).unwrap();
+    let returned_value = client.issue(get(key)).unwrap();
 
     assert_eq!(returned_value, Some(value));
 }
@@ -49,7 +49,7 @@ fn qc_can_insert_an_arbitrary_key_with_a_timeout_into_redis(
         .issue(set(key.clone(), value).with_expiry(Duration::from_secs(timeout as u64)))
         .unwrap();
 
-    let returned_value = client.issue(get::<i64>(key)).unwrap();
+    let returned_value = client.issue(get(key)).unwrap();
 
     assert_eq!(returned_value, Some(value));
     TestResult::passed()
@@ -65,13 +65,13 @@ fn inserting_a_key_with_a_timeout_expires_the_key() {
         .issue(set("test-key", 0).with_expiry(Duration::from_secs(1)))
         .unwrap();
 
-    let returned = client.issue(get::<i64>("test-key".into())).unwrap();
+    let returned = client.issue(get::<i64, _>("test-key")).unwrap();
 
     assert_eq!(Some(0), returned);
 
     thread::sleep(Duration::from_millis(1100));
 
-    let returned = client.issue(get::<i64>("test-key".into())).unwrap();
+    let returned = client.issue(get::<i64, _>("test-key")).unwrap();
     assert_eq!(None, returned);
 }
 
@@ -83,7 +83,7 @@ fn get_behaves_in_an_ergonomic_way_when_macros_arent_involved() {
 
     client.issue(set("name", "Kevin")).unwrap();
     let world = client
-        .issue(get("name".into()).with_default("World".to_string()))
+        .issue(get("name").with_default("World".to_string()))
         .unwrap();
 
     assert_eq!(format!("Hello, {}", world), "Hello, Kevin");
@@ -104,14 +104,14 @@ fn inserting_multiple_keys_with_mset_sets_all_of_them_together() {
         )
         .unwrap();
 
-    assert_eq!(Some(42), client.issue(get("this::that".into())).unwrap());
+    assert_eq!(Some(42), client.issue(get::<i64, _>("this::that")).unwrap());
     assert_eq!(
         Some(52),
-        client.issue(get("the_other::that".into())).unwrap()
+        client.issue(get::<i64, _>("the_other::that")).unwrap()
     );
     assert_eq!(
         Some(62),
-        client.issue(get("all_them::that".into())).unwrap()
+        client.issue(get::<i64, _>("all_them::that")).unwrap()
     );
 }
 
@@ -135,7 +135,7 @@ fn mset_can_fail_if_a_key_already_exists() {
 
     assert_eq!(false, succeeded);
 
-    assert_eq!(Some(100), client.issue(get("this::that".into())).unwrap());
+    assert_eq!(Some(100), client.issue(get("this::that")).unwrap());
 }
 
 #[test]

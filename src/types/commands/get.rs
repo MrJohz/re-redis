@@ -3,23 +3,22 @@ use std::marker::PhantomData;
 
 use crate::types::redis_values::{ConversionError, RedisResult};
 use crate::types::StructuredCommand;
-use crate::utils::validate_key;
+use crate::RBytes;
 
-// TODO: Convert to RBytes
-pub struct Get<T> {
-    key: String,
+pub struct Get<'a, T> {
+    key: RBytes<'a>,
     _t: PhantomData<T>,
 }
 
-impl<T> Get<T> {
-    pub(self) fn new(key: String) -> Self {
+impl<'a, T> Get<'a, T> {
+    pub(self) fn new(key: RBytes<'a>) -> Self {
         Self {
             key,
             _t: PhantomData,
         }
     }
 
-    pub fn with_default(self, default: T) -> GetWithDefault<T> {
+    pub fn with_default(self, default: T) -> GetWithDefault<'a, T> {
         GetWithDefault {
             get_command: self,
             default,
@@ -27,21 +26,14 @@ impl<T> Get<T> {
     }
 }
 
-impl<T> StructuredCommand for Get<T>
+impl<'a, T> StructuredCommand for Get<'a, T>
 where
     RedisResult: TryInto<Option<T>, Error = ConversionError>,
 {
     type Output = Option<T>;
 
     fn get_bytes(&self) -> Vec<u8> {
-        format!(
-            "*2\r\n\
-             $3\r\nGET\r\n\
-             ${}\r\n{}\r\n",
-            self.key.len(),
-            self.key
-        )
-        .into()
+        resp_bytes!("GET", &self.key)
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -49,12 +41,12 @@ where
     }
 }
 
-pub struct GetWithDefault<T> {
-    get_command: Get<T>,
+pub struct GetWithDefault<'a, T> {
+    get_command: Get<'a, T>,
     default: T,
 }
 
-impl<T> StructuredCommand for GetWithDefault<T>
+impl<'a, T> StructuredCommand for GetWithDefault<'a, T>
 where
     RedisResult: TryInto<Option<T>, Error = ConversionError>,
 {
@@ -70,45 +62,47 @@ where
     }
 }
 
-pub fn get<T>(key: String) -> Get<T> {
-    Get::new(validate_key(key))
+pub fn get<'a, T, B>(key: B) -> Get<'a, T>
+where
+    B: Into<RBytes<'a>>,
+{
+    Get::new(key.into())
 }
 
-pub struct GetMultipleList<T> {
-    keys: Vec<String>,
+pub struct GetMultipleList<'a, T> {
+    keys: Vec<RBytes<'a>>,
     _t: PhantomData<T>,
 }
 
-impl<T> GetMultipleList<T> {
-    pub fn key(mut self, key: impl Into<String>) -> Self {
+impl<'a, T> GetMultipleList<'a, T> {
+    pub fn key(mut self, key: impl Into<RBytes<'a>>) -> Self {
         self.keys.push(key.into());
         self
     }
 
-    pub fn with_keys(mut self, keys: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn with_keys(mut self, keys: impl IntoIterator<Item = impl Into<RBytes<'a>>>) -> Self {
         self.keys = keys.into_iter().map(Into::into).collect();
         self
     }
 }
 
-impl<T> StructuredCommand for GetMultipleList<T>
+impl<'a, T> StructuredCommand for GetMultipleList<'a, T>
 where
     RedisResult: TryInto<Option<T>, Error = ConversionError>,
 {
     type Output = Vec<Option<T>>;
 
     fn get_bytes(&self) -> Vec<u8> {
-        let mut message = format!(
-            "*{msg_size}\r\n\
-             $4\r\nMGET\r\n",
-            msg_size = self.keys.len() + 1,
-        );
+        let mut message = Vec::new();
+        message.push(b'*');
+        message.extend_from_slice((self.keys.len() + 1).to_string().as_bytes());
+        message.extend_from_slice(b"\r\n$4\r\nMGET\r\n");
 
         for key in &self.keys {
-            message.push_str(&format!("${len}\r\n{key}\r\n", len = key.len(), key = key))
+            insert_bytes_into_vec!(message, key);
         }
 
-        message.into()
+        message
     }
 
     fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
@@ -122,7 +116,7 @@ where
     }
 }
 
-pub fn mget<T>() -> GetMultipleList<T> {
+pub fn mget<'a, T>() -> GetMultipleList<'a, T> {
     GetMultipleList {
         keys: Vec::new(),
         _t: PhantomData,
@@ -135,7 +129,7 @@ mod tests {
 
     #[test]
     fn get_command_converts_to_bytes_with_correct_type_specification() {
-        let cmd = get::<isize>("test".into());
+        let cmd = get::<isize, _>("test");
 
         assert_eq!(
             String::from_utf8(cmd.get_bytes()).unwrap(),
