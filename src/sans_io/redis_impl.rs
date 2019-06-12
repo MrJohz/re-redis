@@ -58,6 +58,9 @@ impl Client {
                             ConversionError::CannotParseStringResponse { error } => {
                                 RedisError::StringParseError(error)
                             }
+                            ConversionError::InvalidUtf8String(error) => {
+                                RedisError::InvalidUtf8String(error)
+                            }
                         });
                 }
                 Err(error) => return Err(RedisError::ProtocolParseError(error)),

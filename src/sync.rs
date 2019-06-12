@@ -18,10 +18,10 @@ impl Client {
 
         thread::spawn(move || {
             let mut reader = BufReader::new(stream);
-            let mut buffer = String::new();
+            let mut buffer = Vec::new();
 
             loop {
-                match reader.read_line(&mut buffer) {
+                match reader.read_until(b'\n', &mut buffer) {
                     Ok(_) => {
                         let result = tx_bytes.send(Ok(buffer.clone().into()));
                         if result.is_err() {

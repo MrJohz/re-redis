@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::error::Error;
+use std::string::FromUtf8Error;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct RedisErrorValue {
@@ -24,7 +25,7 @@ impl RedisErrorValue {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisResult {
-    String(String),
+    String(Vec<u8>),
     Integer(i64),
     Error(RedisErrorValue),
     Array(Vec<RedisResult>),
@@ -33,16 +34,18 @@ pub enum RedisResult {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisValue {
-    String(String),
+    String(Vec<u8>),
     Integer(i64),
     Array(Vec<Option<RedisValue>>),
 }
 
+// TODO: convert these all to the same style (struct or tuple)
 #[derive(Debug)]
 pub enum ConversionError {
     NoConversionTypeMatch { value: Option<RedisValue> },
     RedisReturnedError { error: RedisErrorValue },
     CannotParseStringResponse { error: Box<Error> },
+    InvalidUtf8String(FromUtf8Error),
 }
 
 macro_rules! create_try_from_impl {
@@ -105,116 +108,176 @@ impl TryFrom<RedisResult> for Option<()> {
     }
 }
 
-create_try_from_impl! { Option<String>; value => {
-    RedisResult::Null => Ok(None),
-    RedisResult::String(text) => Ok(Some(text)),
-}}
+impl TryFrom<RedisResult> for Option<String> {
+    type Error = ConversionError;
+
+    fn try_from(value: RedisResult) -> Result<Self, Self::Error> {
+        match value {
+            RedisResult::Null => Ok(None),
+            RedisResult::String(bytes) => String::from_utf8(bytes)
+                .map(Option::Some)
+                .map_err(ConversionError::InvalidUtf8String),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: Option::try_from(value).unwrap(),
+            }),
+        }
+    }
+}
 
 create_try_from_impl! { Option<isize>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as isize)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<i64>; value => {
     RedisResult::Null => Ok(None),
-    RedisResult::Integer(int) => Ok(Some(int)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::Integer(int) => Ok(Some(int as i64)),
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<i32>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as i32)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<i16>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as i16)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<i8>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as i8)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<usize>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as usize)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<u64>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as u64)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<u32>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as u32)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<u16>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as u16)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<u8>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as u8)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<f64>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as f64)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
 create_try_from_impl! { Option<f32>; value => {
     RedisResult::Null => Ok(None),
     RedisResult::Integer(int) => Ok(Some(int as f32)),
-    RedisResult::String(text) => Ok(Some(text
-        .parse()
-        .map_err(|err| ConversionError::CannotParseStringResponse { error: Box::new(err) })?
+    RedisResult::String(text) => Ok(Some(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
     )),
 }}
 
@@ -227,7 +290,7 @@ impl TryFrom<RedisResult> for Option<Vec<u8>> {
 
     fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
         match r {
-            RedisResult::String(string) => Ok(Some(string.into_bytes())),
+            RedisResult::String(string) => Ok(Some(string)),
             RedisResult::Null => Ok(None),
             RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
             _ => Err(ConversionError::NoConversionTypeMatch {

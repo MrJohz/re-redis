@@ -72,17 +72,9 @@ fn parse_integer(data: &[u8], start: usize, ptr: &mut usize) -> Option<Result<i6
     }
 }
 
-fn parse_simple_string(
-    data: &[u8],
-    start: usize,
-    ptr: &mut usize,
-) -> Option<Result<String, ParseError>> {
+fn parse_simple_string(data: &[u8], start: usize, ptr: &mut usize) -> Option<Vec<u8>> {
     match data[*ptr] as char {
-        '\r' => Some(
-            from_utf8(&data[start..*ptr])
-                .map_err(ParseError::CannotConvertToUtf8)
-                .map(ToString::to_string),
-        ),
+        '\r' => Some((&data[start..*ptr]).to_vec()),
         _ => None,
     }
 }
@@ -126,14 +118,10 @@ fn parse_response(
             }
             ResponseParserState::ParsingSimpleString { start } => {
                 match parse_simple_string(data, *start, ptr) {
-                    Some(Ok(string)) => {
+                    Some(vec) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisResult::String(string)));
-                    }
-                    Some(Err(err)) => {
-                        *state = ResponseParserState::Errored;
-                        return Err(err);
+                        return Ok(Some(RedisResult::String(vec)));
                     }
                     None => {
                         *ptr += 1;
@@ -142,14 +130,18 @@ fn parse_response(
             }
             ResponseParserState::ParsingError { start } => {
                 match parse_simple_string(data, *start, ptr) {
-                    Some(Ok(string)) => {
+                    Some(bytes) => {
                         *state = ResponseParserState::Waiting;
                         *ptr += 2;
-                        return Ok(Some(RedisResult::Error(RedisErrorValue::new(string))));
-                    }
-                    Some(Err(err)) => {
-                        *state = ResponseParserState::Errored;
-                        return Err(err);
+                        let error_string =
+                            from_utf8(&bytes).map_err(|err| ParseError::CannotConvertToUtf8(err));
+                        return match error_string {
+                            Ok(s) => Ok(Some(RedisResult::Error(RedisErrorValue::new(s)))),
+                            Err(error) => {
+                                *state = ResponseParserState::Errored;
+                                Err(error)
+                            }
+                        };
                     }
                     None => {
                         *ptr += 1;
@@ -168,7 +160,7 @@ fn parse_response(
                     Some(Ok(0)) => {
                         *ptr += 4;
                         *state = ResponseParserState::Waiting;
-                        return Ok(Some(RedisResult::String(String::new())));
+                        return Ok(Some(RedisResult::String(Vec::new())));
                     }
                     Some(Ok(-1)) => {
                         *ptr += 2;
@@ -190,12 +182,15 @@ fn parse_response(
             }
             ResponseParserState::ParsingBulkString { start, size } => {
                 if *start + *size == *ptr {
-                    let data = from_utf8(&data[*start..*ptr])
-                        .map_err(ParseError::CannotConvertToUtf8)
-                        .map(|string| Some(RedisResult::String(string.to_string())));
                     *ptr += 2;
-                    *state = ResponseParserState::Waiting;
-                    return data;
+
+                    if let ResponseParserState::ParsingBulkString { start, .. } =
+                        replace(state, ResponseParserState::Waiting)
+                    {
+                        return Ok(Some(RedisResult::String(data[start..(*ptr - 2)].to_vec())));
+                    } else {
+                        panic!("This point should be unreachable");
+                    }
                 } else if *start + *size < *ptr {
                     unreachable!("The current position pointer is beyond the end of the string we are trying to parser.  This is Bad News.")
                 }
@@ -363,7 +358,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("+OK\r\n".as_bytes());
         assert_eq!(
-            Ok(Some(RedisResult::String("OK".to_string()))),
+            Ok(Some(RedisResult::String(b"OK".to_vec()))),
             parser.get_response()
         );
     }
@@ -377,7 +372,10 @@ mod tests {
 
         let mut parser = ResponseParser::new();
         parser.feed(format!("+{}\r\n", text).as_bytes());
-        assert_eq!(Ok(Some(RedisResult::String(text))), parser.get_response());
+        assert_eq!(
+            Ok(Some(RedisResult::String(text.into_bytes()))),
+            parser.get_response()
+        );
         TestResult::passed()
     }
 
@@ -412,7 +410,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("$2\r\nOK\r\n".as_bytes());
         assert_eq!(
-            Ok(Some(RedisResult::String("OK".to_string()))),
+            Ok(Some(RedisResult::String(b"OK".to_vec()))),
             parser.get_response()
         );
     }
@@ -425,7 +423,7 @@ mod tests {
         let mut parser = ResponseParser::new();
         parser.feed("$0\r\n\r\n".as_bytes());
         assert_eq!(
-            Ok(Some(RedisResult::String("".to_string()))),
+            Ok(Some(RedisResult::String(b"".to_vec()))),
             parser.get_response()
         );
     }
@@ -444,7 +442,10 @@ mod tests {
     fn qc_can_parse_any_bulk_string(text: String) {
         let mut parser = ResponseParser::new();
         parser.feed(format!("${}\r\n{}\r\n", text.len(), text).as_bytes());
-        assert_eq!(Ok(Some(RedisResult::String(text))), parser.get_response());
+        assert_eq!(
+            Ok(Some(RedisResult::String(text.into_bytes()))),
+            parser.get_response()
+        );
     }
 
     #[test]
@@ -476,7 +477,7 @@ mod tests {
                     RedisResult::Integer(3),
                 ]),
                 RedisResult::Array(vec![
-                    RedisResult::String("Foo".to_string()),
+                    RedisResult::String(b"Foo".to_vec()),
                     RedisResult::Error(RedisErrorValue::new("Bar")),
                 ])
             ]))),

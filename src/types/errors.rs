@@ -2,6 +2,7 @@ use crate::sans_io::ParseError;
 use crate::{RedisErrorValue, RedisValue};
 use std::error::Error;
 use std::io::Error as IoError;
+use std::string::FromUtf8Error;
 use std::sync::mpsc::RecvError;
 
 #[derive(Debug)]
@@ -12,4 +13,5 @@ pub enum RedisError {
     InternalConnectionError(RecvError),
     ConversionError(Option<RedisValue>),
     StringParseError(Box<Error>),
+    InvalidUtf8String(FromUtf8Error),
 }
