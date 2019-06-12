@@ -103,15 +103,14 @@ fn bitop_not_returns_inversion_of_existing_bits() {
     let server = load_redis_instance();
     let mut client = reredis::SyncClient::new(server.address()).unwrap();
 
-    client.issue(set("source", b"\xFF\xFF")).unwrap();
+    client.issue(set("source", b"\xFF\x00")).unwrap();
     assert_eq!(
         2,
         client.issue(bitop::not("destination", "source")).unwrap()
     );
 
-    // TODO: This needs to be able to handle raw bytes as output
     assert_eq!(
-        Some(b"\x00\x00".to_vec()),
+        Some(b"\x00\xFF".to_vec()),
         client.issue(get("destination")).unwrap()
     );
 }
