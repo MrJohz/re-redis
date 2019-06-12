@@ -222,6 +222,21 @@ create_try_from_impl! { i64; value => {
     RedisResult::Integer(int) => Ok(int),
 }}
 
+impl TryFrom<RedisResult> for Option<Vec<u8>> {
+    type Error = ConversionError;
+
+    fn try_from(r: RedisResult) -> Result<Self, Self::Error> {
+        match r {
+            RedisResult::String(string) => Ok(Some(string.into_bytes())),
+            RedisResult::Null => Ok(None),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: Option::try_from(r).unwrap(),
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

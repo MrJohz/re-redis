@@ -210,3 +210,119 @@ pub fn bitpos<'a>(key: impl Into<RBytes<'a>>, bit: bool) -> BitPos<'a> {
         range: None,
     }
 }
+
+pub struct BitOpUnary<'a> {
+    destination: RBytes<'a>,
+    source: RBytes<'a>,
+}
+
+impl<'a> StructuredCommand for BitOpUnary<'a> {
+    type Output = u32;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        resp_bytes!("BITOP", "NOT", &self.destination, &self.source)
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        match result {
+            RedisResult::Integer(n @ 0...std::i64::MAX) => Ok(n as u32),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: result.try_into()?,
+            }),
+        }
+    }
+}
+
+pub struct BitOpNAry<'a> {
+    command: &'static str, // we can be a bit more specific here, it can't just be anything
+    destination: RBytes<'a>,
+    sources: Vec<RBytes<'a>>,
+}
+
+impl<'a> BitOpNAry<'a> {
+    pub fn with_source(mut self, source: impl Into<RBytes<'a>>) -> Self {
+        self.sources.push(source.into());
+        self
+    }
+}
+
+impl<'a> StructuredCommand for BitOpNAry<'a> {
+    type Output = u32;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut response = Vec::new();
+        response.push(b'*');
+        response.extend_from_slice((3 + self.sources.len()).to_string().as_ref());
+        response.extend_from_slice(b"\r\n");
+
+        insert_bytes_into_vec!(response, "BITOP");
+        insert_bytes_into_vec!(response, self.command);
+        insert_bytes_into_vec!(response, &self.destination);
+        for source in &self.sources {
+            insert_bytes_into_vec!(response, source);
+        }
+
+        response
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        match result {
+            RedisResult::Integer(n @ 0...std::i64::MAX) => Ok(n as u32),
+            RedisResult::Error(error) => Err(ConversionError::RedisReturnedError { error }),
+            _ => Err(ConversionError::NoConversionTypeMatch {
+                value: result.try_into()?,
+            }),
+        }
+    }
+}
+
+// I haven't really seen this practice, but I think this is a nice way to add a bit of scoping
+// to this command.  So the user should call something like `bitop::not(...)`, rather than
+// the function directly
+pub mod bitop {
+    use super::*;
+
+    pub fn not<'a>(
+        destination: impl Into<RBytes<'a>>,
+        source: impl Into<RBytes<'a>>,
+    ) -> BitOpUnary<'a> {
+        BitOpUnary {
+            destination: destination.into(),
+            source: source.into(),
+        }
+    }
+
+    pub fn and<'a>(
+        destination: impl Into<RBytes<'a>>,
+        source: impl Into<RBytes<'a>>,
+    ) -> BitOpNAry<'a> {
+        BitOpNAry {
+            command: "AND",
+            destination: destination.into(),
+            sources: vec![source.into()],
+        }
+    }
+
+    pub fn or<'a>(
+        destination: impl Into<RBytes<'a>>,
+        source: impl Into<RBytes<'a>>,
+    ) -> BitOpNAry<'a> {
+        BitOpNAry {
+            command: "OR",
+            destination: destination.into(),
+            sources: vec![source.into()],
+        }
+    }
+
+    pub fn xor<'a>(
+        destination: impl Into<RBytes<'a>>,
+        source: impl Into<RBytes<'a>>,
+    ) -> BitOpNAry<'a> {
+        BitOpNAry {
+            command: "XOR",
+            destination: destination.into(),
+            sources: vec![source.into()],
+        }
+    }
+}

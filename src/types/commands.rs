@@ -8,4 +8,4 @@ pub mod increment;
 pub use increment::{decr, decr_by, incr, incr_by};
 
 pub mod bit_commands;
-pub use bit_commands::{bitcount, bitpos, getbit, setbit};
+pub use bit_commands::{bitcount, bitop, bitpos, getbit, setbit};
