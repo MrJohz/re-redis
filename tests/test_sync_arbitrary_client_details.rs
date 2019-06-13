@@ -3,7 +3,7 @@ mod utils;
 
 use reredis::commands::*;
 
-use crate::utils::load_redis_instance;
+use crate::utils::*;
 
 #[test]
 fn can_send_and_receive_non_utf8_bytes() {
@@ -13,4 +13,14 @@ fn can_send_and_receive_non_utf8_bytes() {
     client.issue(set("my-key", b"\x00\xFF")).unwrap();
 
     assert_eq!(Some(vec![0x00, 0xFF]), client.issue(get("my-key")).unwrap());
+}
+
+#[test]
+fn can_login_with_authorisation() {
+    let server = RedisInstance::new()
+        .with_setting("requirepass", &["\"test password\""])
+        .build();
+    let mut client = reredis::SyncClient::with_auth(server.address(), "test password").unwrap();
+
+    assert_eq!((), client.issue(ping()).unwrap());
 }

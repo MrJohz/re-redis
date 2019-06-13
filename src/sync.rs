@@ -1,5 +1,5 @@
 use crate::sans_io::Client as SansIoClient;
-use crate::{RedisError, StructuredCommand};
+use crate::{Command, RBytes, RedisError, StructuredCommand};
 use std::io::{BufRead, BufReader, BufWriter, Result as IoResult, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::thread;
@@ -41,6 +41,15 @@ impl Client {
         });
 
         Ok(Self { parser, writer })
+    }
+
+    pub fn with_auth<'a>(
+        address: impl ToSocketAddrs,
+        pass: impl Into<RBytes<'a>>,
+    ) -> Result<Self, RedisError> {
+        let mut client = Self::new(address).map_err(RedisError::ConnectionError)?;
+        client.issue(Command::cmd("AUTH").with_arg(pass))?;
+        Ok(client)
     }
 
     pub fn issue<Cmd>(&mut self, cmd: Cmd) -> Result<<Cmd as StructuredCommand>::Output, RedisError>
