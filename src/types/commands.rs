@@ -11,4 +11,4 @@ pub mod bit_commands;
 pub use bit_commands::{bitcount, bitop, bitpos, getbit, setbit};
 
 pub mod util_commands;
-pub use util_commands::{ping};
+pub use util_commands::{ping, echo};

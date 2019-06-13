@@ -281,6 +281,13 @@ create_try_from_impl! { Option<f32>; value => {
     )),
 }}
 
+create_try_from_impl! { String; value => {
+    RedisResult::String(text) => Ok(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?,
+    ),
+}}
+
 create_try_from_impl! { i64; value => {
     RedisResult::Integer(int) => Ok(int),
 }}

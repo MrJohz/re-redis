@@ -1,5 +1,5 @@
 use crate::types::redis_values::ConversionError;
-use crate::{RedisResult, RedisValue, StructuredCommand};
+use crate::{RBytes, RedisResult, RedisValue, StructuredCommand};
 use std::convert::TryInto;
 
 pub struct Ping;
@@ -33,4 +33,22 @@ impl StructuredCommand for Ping {
 
 pub fn ping() -> Ping {
     Ping
+}
+
+pub struct Echo<'a>(RBytes<'a>);
+
+impl<'a> StructuredCommand for Echo<'a> {
+    type Output = String;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        resp_bytes!("ECHO", &self.0)
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
+}
+
+pub fn echo<'a>(text: impl Into<String>) -> Echo<'a> {
+    Echo(text.into().into())
 }

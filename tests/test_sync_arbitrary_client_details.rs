@@ -24,3 +24,11 @@ fn can_login_with_authorisation() {
 
     assert_eq!((), client.issue(ping()).unwrap());
 }
+
+#[test]
+fn can_emit_echo_command() {
+    let server = load_redis_instance();
+    let mut client = reredis::SyncClient::new(server.address()).unwrap();
+
+    assert_eq!("test", client.issue(echo("test")).unwrap());
+}
