@@ -326,3 +326,5 @@ pub mod bitop {
         }
     }
 }
+
+// TODO: BITFIELD

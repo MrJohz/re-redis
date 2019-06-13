@@ -285,6 +285,17 @@ create_try_from_impl! { i64; value => {
     RedisResult::Integer(int) => Ok(int),
 }}
 
+create_try_from_impl! { f64; value => {
+    RedisResult::String(text) => Ok(
+        String::from_utf8(text)
+            .map_err(ConversionError::InvalidUtf8String)?
+            .parse()
+            .map_err(|err| ConversionError::CannotParseStringResponse {
+                error: Box::new(err),
+            })?,
+    ),
+}}
+
 impl TryFrom<RedisResult> for Option<Vec<u8>> {
     type Error = ConversionError;
 

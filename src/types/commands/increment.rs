@@ -48,6 +48,37 @@ impl<'a> StructuredCommand for Increment<'a> {
     }
 }
 
+pub struct FloatIncrement<'a> {
+    key: RBytes<'a>,
+    by: f64,
+}
+
+pub fn incr_by_float<'a>(key: impl Into<RBytes<'a>>, by: f64) -> FloatIncrement<'a> {
+    FloatIncrement {
+        key: key.into(),
+        by,
+    }
+}
+
+pub fn decr_by_float<'a>(key: impl Into<RBytes<'a>>, by: f64) -> FloatIncrement<'a> {
+    FloatIncrement {
+        key: key.into(),
+        by: -by,
+    }
+}
+
+impl<'a> StructuredCommand for FloatIncrement<'a> {
+    type Output = f64;
+
+    fn get_bytes(&self) -> Vec<u8> {
+        resp_bytes!("INCRBYFLOAT", &self.key, &self.by.to_string())
+    }
+
+    fn convert_redis_result(self, result: RedisResult) -> Result<Self::Output, ConversionError> {
+        result.try_into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
