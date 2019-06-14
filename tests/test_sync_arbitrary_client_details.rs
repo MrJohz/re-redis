@@ -1,3 +1,5 @@
+#![cfg(feature = "sync-client")]
+
 extern crate reredis;
 mod utils;
 
